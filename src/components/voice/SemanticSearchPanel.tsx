@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,7 +46,7 @@ const SemanticSearchPanel: React.FC<Props> = ({ className }) => {
     'general'
   ];
 
-  const handleSearch = async () => {
+  const handleSearch = useCallback(async () => {
     if (!query.trim()) {
       toast({
         title: "Search Query Required",
@@ -88,13 +88,13 @@ const SemanticSearchPanel: React.FC<Props> = ({ className }) => {
     } finally {
       setIsSearching(false);
     }
-  };
+  }, [query, specialtyFilter, toast]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !isSearching) {
       handleSearch();
     }
-  };
+  }, [isSearching, handleSearch]);
 
   const formatDate = (dateString?: string): string => {
     if (!dateString) return 'Unknown';
@@ -133,6 +133,7 @@ const SemanticSearchPanel: React.FC<Props> = ({ className }) => {
               className="flex-1"
             />
             <Button 
+              type="button"
               onClick={handleSearch} 
               disabled={isSearching}
               className="px-6"
@@ -242,6 +243,7 @@ const SemanticSearchPanel: React.FC<Props> = ({ className }) => {
                         Relevance: {(result.similarity * 100).toFixed(1)}%
                       </span>
                       <Button
+                        type="button"
                         variant="ghost"
                         size="sm"
                         className="h-6 px-2 text-xs"

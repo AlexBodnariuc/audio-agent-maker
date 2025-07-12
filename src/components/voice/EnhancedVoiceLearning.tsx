@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -75,7 +75,7 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
     }
   }, [session, conversationId, onVoiceSessionStart]);
 
-  const handleStartSession = async () => {
+  const handleStartSession = useCallback(async () => {
     if (isStarting) return;
     
     try {
@@ -113,27 +113,27 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
     } finally {
       setIsStarting(false);
     }
-  };
+  }, [specialtyFocus, quizSessionId, toast, startSession]);
 
-  const handleEndSession = () => {
+  const handleEndSession = useCallback(() => {
     endSession();
     setConversationId(null);
     onVoiceSessionEnd?.();
-  };
+  }, [endSession, onVoiceSessionEnd]);
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = useCallback(async () => {
     if (!textInput.trim()) return;
     
     await sendTextMessage(textInput);
     setTextInput('');
-  };
+  }, [textInput, sendTextMessage]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
-  };
+  }, [handleSendMessage]);
 
   const updateLearningMetrics = (responseText: string) => {
     // Simple metrics based on response content
@@ -196,6 +196,7 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
           <div className="flex items-center justify-center gap-4">
             {!isConnected ? (
               <Button 
+                type="button"
                 onClick={handleStartSession}
                 disabled={isStarting}
                 size="lg"
@@ -207,6 +208,7 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
             ) : (
               <>
                 <Button
+                  type="button"
                   variant={isListening ? "destructive" : "default"}
                   onClick={isListening ? stopListening : startListening}
                   disabled={isProcessing}
@@ -226,6 +228,7 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
                 </Button>
 
                 <Button
+                  type="button"
                   variant="outline"
                   onClick={() => setVoiceEnabled(!voiceEnabled)}
                 >
@@ -243,6 +246,7 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
                 </Button>
 
                 <Button
+                  type="button"
                   variant="outline"
                   onClick={handleEndSession}
                 >
@@ -390,6 +394,7 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
                 className="flex-1"
               />
               <Button
+                type="button"
                 onClick={handleSendMessage}
                 disabled={!textInput.trim() || isProcessing}
                 size="icon"

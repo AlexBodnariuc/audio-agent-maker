@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -61,7 +61,60 @@ const VoiceLearningInterface: React.FC<Props> = ({
     };
   }, []);
 
-  const startVoiceSession = async () => {
+  const calculateEngagement = useCallback((): number => {
+    const baseEngagement = sessionDuration > 0 ? Math.min((sessionDuration / 300) * 100, 100) : 0;
+    const termBonus = medicalTermsUsed.length * 5;
+    return Math.min(baseEngagement + termBonus, 100);
+  }, [sessionDuration, medicalTermsUsed]);
+
+  const processVoiceAnalytics = useCallback(async () => {
+    if (!conversationId) return;
+
+    try {
+      const { data, error } = await supabase.functions.invoke('voice-analytics', {
+        body: {
+          conversationId,
+          sessionDuration,
+          voiceMetrics,
+          learningTopics: [specialtyFocus],
+          comprehensionIndicators: {
+            medicalTermsCount: medicalTermsUsed.length,
+            sessionEngagement: calculateEngagement()
+          }
+        }
+      });
+
+      if (error) throw error;
+
+      if (data.insights) {
+        setInsights(data.insights);
+      }
+
+    } catch (error) {
+      console.error('Error processing voice analytics:', error);
+    }
+  }, [conversationId, sessionDuration, voiceMetrics, specialtyFocus, medicalTermsUsed, calculateEngagement]);
+
+  const linkToQuizSession = useCallback(async () => {
+    if (!conversationId || !quizSessionId) return;
+
+    try {
+      await supabase
+        .from('quiz_voice_sessions')
+        .insert({
+          quiz_session_id: quizSessionId,
+          conversation_id: conversationId,
+          voice_assistance_type: 'guidance',
+          topics_covered: [specialtyFocus],
+          effectiveness_score: Math.floor(insights?.learningEffectiveness || 50)
+        });
+
+    } catch (error) {
+      console.error('Error linking to quiz session:', error);
+    }
+  }, [conversationId, quizSessionId, specialtyFocus, insights?.learningEffectiveness]);
+
+  const startVoiceSession = useCallback(async () => {
     try {
       setIsListening(true);
       sessionStartTime.current = Date.now();
@@ -117,9 +170,9 @@ const VoiceLearningInterface: React.FC<Props> = ({
       });
       setIsListening(false);
     }
-  };
+  }, [specialtyFocus, quizSessionId, onVoiceSessionStart, toast]);
 
-  const endVoiceSession = async () => {
+  const endVoiceSession = useCallback(async () => {
     try {
       setIsListening(false);
       
@@ -174,60 +227,7 @@ const VoiceLearningInterface: React.FC<Props> = ({
     setSessionDuration(0);
     setInsights(null);
     setMedicalTermsUsed([]);
-  };
-
-  const processVoiceAnalytics = async () => {
-    if (!conversationId) return;
-
-    try {
-      const { data, error } = await supabase.functions.invoke('voice-analytics', {
-        body: {
-          conversationId,
-          sessionDuration,
-          voiceMetrics,
-          learningTopics: [specialtyFocus],
-          comprehensionIndicators: {
-            medicalTermsCount: medicalTermsUsed.length,
-            sessionEngagement: calculateEngagement()
-          }
-        }
-      });
-
-      if (error) throw error;
-
-      if (data.insights) {
-        setInsights(data.insights);
-      }
-
-    } catch (error) {
-      console.error('Error processing voice analytics:', error);
-    }
-  };
-
-  const linkToQuizSession = async () => {
-    if (!conversationId || !quizSessionId) return;
-
-    try {
-      await supabase
-        .from('quiz_voice_sessions')
-        .insert({
-          quiz_session_id: quizSessionId,
-          conversation_id: conversationId,
-          voice_assistance_type: 'guidance',
-          topics_covered: [specialtyFocus],
-          effectiveness_score: Math.floor(insights?.learningEffectiveness || 50)
-        });
-
-    } catch (error) {
-      console.error('Error linking to quiz session:', error);
-    }
-  };
-
-  const calculateEngagement = (): number => {
-    const baseEngagement = sessionDuration > 0 ? Math.min((sessionDuration / 300) * 100, 100) : 0;
-    const termBonus = medicalTermsUsed.length * 5;
-    return Math.min(baseEngagement + termBonus, 100);
-  };
+  }, [conversationId, sessionDuration, specialtyFocus, quizSessionId, onVoiceSessionEnd, processVoiceAnalytics, linkToQuizSession, toast]);
 
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -251,6 +251,7 @@ const VoiceLearningInterface: React.FC<Props> = ({
         <CardContent className="space-y-4">
           <div className="flex items-center justify-center">
             <Button
+              type="button"
               onClick={isListening ? endVoiceSession : startVoiceSession}
               size="lg"
               variant={isListening ? "destructive" : "default"}

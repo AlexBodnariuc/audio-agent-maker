@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -48,11 +48,7 @@ const LearningPathManager: React.FC<Props> = ({ className, onPathSelect }) => {
   const levels = ['beginner', 'intermediate', 'advanced'];
   const learningStyles = ['audio', 'visual', 'mixed'];
 
-  useEffect(() => {
-    loadLearningPaths();
-  }, []);
-
-  const loadLearningPaths = async () => {
+  const loadLearningPaths = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('learning_paths')
@@ -76,9 +72,13 @@ const LearningPathManager: React.FC<Props> = ({ className, onPathSelect }) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [onPathSelect, toast]);
 
-  const createLearningPath = async (specialty: string, level: string, style: string) => {
+  useEffect(() => {
+    loadLearningPaths();
+  }, [loadLearningPaths]);
+
+  const createLearningPath = useCallback(async (specialty: string, level: string, style: string) => {
     setIsCreating(true);
     
     try {
@@ -123,9 +123,9 @@ const LearningPathManager: React.FC<Props> = ({ className, onPathSelect }) => {
     } finally {
       setIsCreating(false);
     }
-  };
+  }, [onPathSelect, toast]);
 
-  const updateProgress = async (pathId: string, completedTopic: string) => {
+  const updateProgress = useCallback(async (pathId: string, completedTopic: string) => {
     try {
       const path = learningPaths.find(p => p.id === pathId);
       if (!path) return;
@@ -165,7 +165,7 @@ const LearningPathManager: React.FC<Props> = ({ className, onPathSelect }) => {
         variant: "destructive",
       });
     }
-  };
+  }, [learningPaths, toast]);
 
   const generateRecommendedTopics = (specialty: string, level: string): any => {
     const topicMaps: Record<string, Record<string, string[]>> = {
@@ -269,6 +269,7 @@ const LearningPathManager: React.FC<Props> = ({ className, onPathSelect }) => {
                 </Select>
                 
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => {
@@ -330,6 +331,7 @@ const LearningPathManager: React.FC<Props> = ({ className, onPathSelect }) => {
                             
                             {!isCompleted && (
                               <Button
+                                type="button"
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => updateProgress(selectedPath.id, topic)}
@@ -385,14 +387,14 @@ const CreatePathForm: React.FC<{
   const [level, setLevel] = useState('');
   const [style, setStyle] = useState('');
 
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     if (specialty && level && style) {
       onSubmit(specialty, level, style);
       setSpecialty('');
       setLevel('');
       setStyle('');
     }
-  };
+  }, [specialty, level, style, onSubmit]);
 
   return (
     <Card className="border-dashed">
@@ -439,6 +441,7 @@ const CreatePathForm: React.FC<{
         </div>
 
         <Button 
+          type="button"
           onClick={handleSubmit}
           disabled={!specialty || !level || !style || isCreating}
           className="w-full"
