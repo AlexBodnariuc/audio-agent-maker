@@ -209,6 +209,39 @@ export type Database = {
         }
         Relationships: []
       }
+      conversation_embeddings: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          embedding: string | null
+          id: string
+          medical_keywords: string[] | null
+          message_content: string
+          specialty_context: string | null
+          updated_at: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          medical_keywords?: string[] | null
+          message_content: string
+          specialty_context?: string | null
+          updated_at?: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          medical_keywords?: string[] | null
+          message_content?: string
+          specialty_context?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       conversation_evaluations: {
         Row: {
           conversation_id: string
@@ -260,33 +293,48 @@ export type Database = {
       conversation_messages: {
         Row: {
           audio_url: string | null
+          confidence_score: number | null
           content: string
           conversation_id: string
           created_at: string
           id: string
+          language_detected: string | null
+          medical_entities: Json | null
           message_type: string
           metadata: Json | null
+          processing_time: number | null
           timestamp: string
+          voice_metadata: Json | null
         }
         Insert: {
           audio_url?: string | null
+          confidence_score?: number | null
           content: string
           conversation_id: string
           created_at?: string
           id?: string
+          language_detected?: string | null
+          medical_entities?: Json | null
           message_type: string
           metadata?: Json | null
+          processing_time?: number | null
           timestamp?: string
+          voice_metadata?: Json | null
         }
         Update: {
           audio_url?: string | null
+          confidence_score?: number | null
           content?: string
           conversation_id?: string
           created_at?: string
           id?: string
+          language_detected?: string | null
+          medical_entities?: Json | null
           message_type?: string
           metadata?: Json | null
+          processing_time?: number | null
           timestamp?: string
+          voice_metadata?: Json | null
         }
         Relationships: [
           {
@@ -305,6 +353,9 @@ export type Database = {
           email_session_id: string | null
           ended_at: string | null
           id: string
+          learning_context: Json | null
+          quiz_session_id: string | null
+          specialty_focus: string | null
           started_at: string
           status: string
           title: string | null
@@ -312,6 +363,7 @@ export type Database = {
           updated_at: string
           user_id: string | null
           voice_personality_id: string
+          voice_session_type: string | null
         }
         Insert: {
           created_at?: string
@@ -319,6 +371,9 @@ export type Database = {
           email_session_id?: string | null
           ended_at?: string | null
           id?: string
+          learning_context?: Json | null
+          quiz_session_id?: string | null
+          specialty_focus?: string | null
           started_at?: string
           status?: string
           title?: string | null
@@ -326,6 +381,7 @@ export type Database = {
           updated_at?: string
           user_id?: string | null
           voice_personality_id: string
+          voice_session_type?: string | null
         }
         Update: {
           created_at?: string
@@ -333,6 +389,9 @@ export type Database = {
           email_session_id?: string | null
           ended_at?: string | null
           id?: string
+          learning_context?: Json | null
+          quiz_session_id?: string | null
+          specialty_focus?: string | null
           started_at?: string
           status?: string
           title?: string | null
@@ -340,6 +399,7 @@ export type Database = {
           updated_at?: string
           user_id?: string | null
           voice_personality_id?: string
+          voice_session_type?: string | null
         }
         Relationships: [
           {
@@ -448,6 +508,48 @@ export type Database = {
           is_active?: boolean
           name?: string
           weight?: number | null
+        }
+        Relationships: []
+      }
+      learning_paths: {
+        Row: {
+          completed_topics: Json | null
+          created_at: string
+          current_level: string | null
+          email_session_id: string | null
+          id: string
+          learning_style: string | null
+          recommended_topics: Json | null
+          specialty_focus: string | null
+          updated_at: string
+          user_id: string | null
+          voice_preferences: Json | null
+        }
+        Insert: {
+          completed_topics?: Json | null
+          created_at?: string
+          current_level?: string | null
+          email_session_id?: string | null
+          id?: string
+          learning_style?: string | null
+          recommended_topics?: Json | null
+          specialty_focus?: string | null
+          updated_at?: string
+          user_id?: string | null
+          voice_preferences?: Json | null
+        }
+        Update: {
+          completed_topics?: Json | null
+          created_at?: string
+          current_level?: string | null
+          email_session_id?: string | null
+          id?: string
+          learning_style?: string | null
+          recommended_topics?: Json | null
+          specialty_focus?: string | null
+          updated_at?: string
+          user_id?: string | null
+          voice_preferences?: Json | null
         }
         Relationships: []
       }
@@ -857,6 +959,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      quiz_voice_sessions: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          effectiveness_score: number | null
+          id: string
+          quiz_session_id: string
+          topics_covered: string[] | null
+          updated_at: string
+          voice_assistance_type: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          effectiveness_score?: number | null
+          id?: string
+          quiz_session_id: string
+          topics_covered?: string[] | null
+          updated_at?: string
+          voice_assistance_type: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          effectiveness_score?: number | null
+          id?: string
+          quiz_session_id?: string
+          topics_covered?: string[] | null
+          updated_at?: string
+          voice_assistance_type?: string
+        }
+        Relationships: []
       }
       rate_limits: {
         Row: {
@@ -1274,6 +1409,54 @@ export type Database = {
           },
         ]
       }
+      voice_analytics: {
+        Row: {
+          comprehension_indicators: Json | null
+          confidence_scores: Json | null
+          conversation_id: string
+          created_at: string
+          email_session_id: string | null
+          id: string
+          learning_topics: string[] | null
+          medical_terms_used: string[] | null
+          session_duration: number | null
+          updated_at: string
+          user_id: string | null
+          voice_metrics: Json | null
+          word_count: number | null
+        }
+        Insert: {
+          comprehension_indicators?: Json | null
+          confidence_scores?: Json | null
+          conversation_id: string
+          created_at?: string
+          email_session_id?: string | null
+          id?: string
+          learning_topics?: string[] | null
+          medical_terms_used?: string[] | null
+          session_duration?: number | null
+          updated_at?: string
+          user_id?: string | null
+          voice_metrics?: Json | null
+          word_count?: number | null
+        }
+        Update: {
+          comprehension_indicators?: Json | null
+          confidence_scores?: Json | null
+          conversation_id?: string
+          created_at?: string
+          email_session_id?: string | null
+          id?: string
+          learning_topics?: string[] | null
+          medical_terms_used?: string[] | null
+          session_duration?: number | null
+          updated_at?: string
+          user_id?: string | null
+          voice_metrics?: Json | null
+          word_count?: number | null
+        }
+        Relationships: []
+      }
       voice_personalities: {
         Row: {
           agent_id: string
@@ -1312,6 +1495,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      binary_quantize: {
+        Args: { "": string } | { "": unknown }
+        Returns: unknown
+      }
       create_email_account: {
         Args: { input_email: string; input_password: string }
         Returns: Json
@@ -1336,6 +1523,73 @@ export type Database = {
         Args: { "": unknown }
         Returns: unknown
       }
+      halfvec_avg: {
+        Args: { "": number[] }
+        Returns: unknown
+      }
+      halfvec_out: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      halfvec_send: {
+        Args: { "": unknown }
+        Returns: string
+      }
+      halfvec_typmod_in: {
+        Args: { "": unknown[] }
+        Returns: number
+      }
+      hnsw_bit_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      hnsw_halfvec_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      hnsw_sparsevec_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      hnswhandler: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      ivfflat_bit_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      ivfflat_halfvec_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      ivfflathandler: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      l2_norm: {
+        Args: { "": unknown } | { "": unknown }
+        Returns: number
+      }
+      l2_normalize: {
+        Args: { "": string } | { "": unknown } | { "": unknown }
+        Returns: unknown
+      }
+      semantic_search_conversations: {
+        Args: {
+          query_embedding: string
+          match_threshold?: number
+          match_count?: number
+          user_context?: string
+        }
+        Returns: {
+          conversation_id: string
+          message_content: string
+          similarity: number
+          specialty_context: string
+          medical_keywords: string[]
+        }[]
+      }
       set_limit: {
         Args: { "": number }
         Returns: number
@@ -1347,6 +1601,42 @@ export type Database = {
       show_trgm: {
         Args: { "": string }
         Returns: string[]
+      }
+      sparsevec_out: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      sparsevec_send: {
+        Args: { "": unknown }
+        Returns: string
+      }
+      sparsevec_typmod_in: {
+        Args: { "": unknown[] }
+        Returns: number
+      }
+      vector_avg: {
+        Args: { "": number[] }
+        Returns: string
+      }
+      vector_dims: {
+        Args: { "": string } | { "": unknown }
+        Returns: number
+      }
+      vector_norm: {
+        Args: { "": string }
+        Returns: number
+      }
+      vector_out: {
+        Args: { "": string }
+        Returns: unknown
+      }
+      vector_send: {
+        Args: { "": string }
+        Returns: string
+      }
+      vector_typmod_in: {
+        Args: { "": unknown[] }
+        Returns: number
       }
       verify_email_password: {
         Args: { input_email: string; input_password: string }

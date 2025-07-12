@@ -2,9 +2,13 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AgentForm from "@/components/AgentForm";
 import CodeViewer from "@/components/CodeViewer";
-import { Bot, Sparkles, Zap, Github, Database, Shield, Mic, Code, FileCode, Download } from "lucide-react";
+import VoiceLearningInterface from "@/components/voice/VoiceLearningInterface";
+import SemanticSearchPanel from "@/components/voice/SemanticSearchPanel";
+import LearningPathManager from "@/components/voice/LearningPathManager";
+import { Bot, Sparkles, Zap, Github, Database, Shield, Mic, Code, FileCode, Download, Brain, Search, Map } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface AgentFormData {
@@ -328,21 +332,52 @@ export default function Index() {
             })}
           </div>
 
-          {/* Form Section */}
-          <div className="max-w-4xl mx-auto mb-16">
-            <AgentForm onSubmit={handleFormSubmit} isGenerating={isGenerating} />
-          </div>
+          {/* Enhanced Interface with Tabs */}
+          <div className="max-w-7xl mx-auto mb-16">
+            <Tabs defaultValue="builder" className="w-full">
+              <TabsList className="grid w-full grid-cols-4 mb-8">
+                <TabsTrigger value="builder" className="flex items-center gap-2">
+                  <Code className="h-4 w-4" />
+                  Agent Builder
+                </TabsTrigger>
+                <TabsTrigger value="voice" className="flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  Voice Learning
+                </TabsTrigger>
+                <TabsTrigger value="search" className="flex items-center gap-2">
+                  <Search className="h-4 w-4" />
+                  Semantic Search
+                </TabsTrigger>
+                <TabsTrigger value="paths" className="flex items-center gap-2">
+                  <Map className="h-4 w-4" />
+                  Learning Paths
+                </TabsTrigger>
+              </TabsList>
 
-          {/* Code Viewer */}
-          {showCode && (
-            <div className="max-w-6xl mx-auto">
-              <CodeViewer 
-                agentCode={agentCode} 
-                agentName={agentName}
-                isVisible={showCode}
-              />
-            </div>
-          )}
+              <TabsContent value="builder" className="space-y-8">
+                <AgentForm onSubmit={handleFormSubmit} isGenerating={isGenerating} />
+                {showCode && (
+                  <CodeViewer 
+                    agentCode={agentCode} 
+                    agentName={agentName}
+                    isVisible={showCode}
+                  />
+                )}
+              </TabsContent>
+
+              <TabsContent value="voice">
+                <VoiceLearningInterface specialtyFocus="general" />
+              </TabsContent>
+
+              <TabsContent value="search">
+                <SemanticSearchPanel />
+              </TabsContent>
+
+              <TabsContent value="paths">
+                <LearningPathManager />
+              </TabsContent>
+            </Tabs>
+          </div>
         </div>
       </div>
 
