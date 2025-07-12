@@ -96,9 +96,14 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   }, [toast]);
 
   const startListening = useCallback(async () => {
-    if (!session) return;
+    if (!session) {
+      console.warn('Cannot start listening: no active session');
+      return;
+    }
 
     try {
+      console.log('Starting voice recording...');
+      
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: 16000,
@@ -116,18 +121,24 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
       audioChunksRef.current = [];
 
       mediaRecorderRef.current.ondataavailable = (event) => {
+        console.log('Audio data available:', event.data.size, 'bytes');
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
 
       mediaRecorderRef.current.onstop = async () => {
+        console.log('Recording stopped, processing audio...');
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        await processAudioBlob(audioBlob);
+        console.log('Audio blob created:', audioBlob.size, 'bytes');
+        
+        // Process audio without circular dependency
+        await processAudioBlobInternal(audioBlob);
       };
 
       mediaRecorderRef.current.start();
       setSession(prev => prev ? { ...prev, isListening: true } : null);
+      console.log('Recording started successfully');
 
     } catch (error) {
       console.error('Error starting voice recording:', error);
@@ -138,7 +149,7 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
         variant: "destructive",
       });
     }
-  }, [session, onError, toast]);
+  }, [session?.conversationId, onError, toast]);
 
   const stopListening = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -147,28 +158,51 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
     setSession(prev => prev ? { ...prev, isListening: false } : null);
   }, []);
 
-  const processAudioBlob = useCallback(async (audioBlob: Blob) => {
-    if (!session?.conversationId) return;
+  // Internal audio processing without circular dependencies
+  const processAudioBlobInternal = async (audioBlob: Blob) => {
+    const currentSession = session;
+    if (!currentSession?.conversationId) {
+      console.warn('Cannot process audio: no active session');
+      return;
+    }
 
     try {
+      console.log('Processing audio blob...');
       setSession(prev => prev ? { ...prev, isProcessing: true } : null);
 
       // Convert blob to base64
       const arrayBuffer = await audioBlob.arrayBuffer();
       const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      console.log('Audio converted to base64, length:', base64Audio.length);
 
       // Transcribe audio
+      console.log('Sending audio for transcription...');
       const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke('openai-speech-to-text', {
         body: {
           audio: base64Audio,
-          conversationId: session.conversationId,
+          conversationId: currentSession.conversationId,
           language: 'en'
         }
       });
 
-      if (transcriptionError) throw transcriptionError;
+      if (transcriptionError) {
+        console.error('Transcription error:', transcriptionError);
+        throw transcriptionError;
+      }
 
-      const transcription = transcriptionData.text;
+      const transcription = transcriptionData?.text || '';
+      console.log('Transcription received:', transcription);
+      
+      if (!transcription.trim()) {
+        console.warn('Empty transcription received');
+        toast({
+          title: "No Speech Detected",
+          description: "Please try speaking more clearly.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       onTranscription?.(transcription);
 
       // Add user message to local state
@@ -180,85 +214,129 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
       setMessages(prev => [...prev, userMessage]);
 
       // Send to OpenAI assistant if we have a thread
-      if (session.threadId) {
-        await processWithAssistant(transcription);
+      if (currentSession.threadId) {
+        console.log('Processing with assistant...');
+        await processWithAssistantInternal(transcription, currentSession);
       } else {
-        // Fallback to direct chat
-        await processWithDirectChat(transcription);
+        console.log('Processing with direct chat...');
+        await processWithDirectChatInternal(transcription, currentSession);
       }
 
     } catch (error) {
       console.error('Error processing audio:', error);
-      onError?.(error.message);
+      onError?.(error.message || 'Failed to process audio');
+      toast({
+        title: "Processing Error",
+        description: "Failed to process voice input. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setSession(prev => prev ? { ...prev, isProcessing: false } : null);
     }
-  }, [session, onTranscription, onError]);
+  };
 
-  const processWithAssistant = useCallback(async (message: string) => {
-    if (!session?.conversationId || !session.threadId) return;
+  const processAudioBlob = useCallback(async (audioBlob: Blob) => {
+    await processAudioBlobInternal(audioBlob);
+  }, []);
+
+  // Internal assistant processing without circular dependencies
+  const processWithAssistantInternal = async (message: string, currentSession: VoiceSession) => {
+    if (!currentSession?.conversationId || !currentSession.threadId) {
+      console.warn('Cannot process with assistant: missing session data');
+      return;
+    }
 
     try {
+      console.log('Sending message to assistant...');
       // Send message to assistant
       const { data: runData, error: runError } = await supabase.functions.invoke('openai-conversation-assistant', {
         body: {
-          conversationId: session.conversationId,
+          conversationId: currentSession.conversationId,
           action: 'send_message',
           message,
-          threadId: session.threadId
+          threadId: currentSession.threadId
         }
       });
 
-      if (runError) throw runError;
+      if (runError) {
+        console.error('Assistant run error:', runError);
+        throw runError;
+      }
 
       // Poll for completion
-      const runId = runData.data.runId;
-      await pollForCompletion(runId);
+      const runId = runData.data?.runId;
+      if (runId) {
+        console.log('Polling for completion, runId:', runId);
+        await pollForCompletionInternal(runId, currentSession);
+      } else {
+        throw new Error('No run ID received from assistant');
+      }
 
     } catch (error) {
       console.error('Error processing with assistant:', error);
-      onError?.(error.message);
+      onError?.(error.message || 'Assistant processing failed');
+    }
+  };
+
+  const processWithAssistant = useCallback(async (message: string) => {
+    if (session) {
+      await processWithAssistantInternal(message, session);
     }
   }, [session, onError]);
 
-  const pollForCompletion = useCallback(async (runId: string) => {
-    if (!session?.threadId) return;
+  // Internal polling without circular dependencies
+  const pollForCompletionInternal = async (runId: string, currentSession: VoiceSession) => {
+    if (!currentSession?.threadId) {
+      console.warn('Cannot poll: missing thread ID');
+      return;
+    }
 
     const maxAttempts = 30; // 30 seconds timeout
     let attempts = 0;
 
     const poll = async (): Promise<void> => {
       try {
+        console.log(`Polling attempt ${attempts + 1}/${maxAttempts}`);
         const { data, error } = await supabase.functions.invoke('openai-conversation-assistant', {
           body: {
-            conversationId: session.conversationId,
+            conversationId: currentSession.conversationId,
             action: 'get_status',
-            threadId: session.threadId,
+            threadId: currentSession.threadId,
             runId
           }
         });
 
-        if (error) throw error;
+        if (error) {
+          console.error('Polling error:', error);
+          throw error;
+        }
 
-        const status = data.data.status;
+        const status = data.data?.status;
+        console.log('Assistant status:', status);
 
         if (status === 'completed') {
-          const responseText = data.data.message;
+          const responseText = data.data?.message;
+          console.log('Assistant response:', responseText);
           
-          // Add assistant message to local state
-          const assistantMessage = {
-            role: 'assistant' as const,
-            content: responseText,
-            timestamp: new Date()
-          };
-          setMessages(prev => [...prev, assistantMessage]);
+          if (responseText) {
+            // Add assistant message to local state
+            const assistantMessage = {
+              role: 'assistant' as const,
+              content: responseText,
+              timestamp: new Date()
+            };
+            setMessages(prev => [...prev, assistantMessage]);
 
-          // Generate speech if voice is enabled
-          if (useVoice && responseText) {
-            await generateAndPlaySpeech(responseText);
+            // Generate speech if voice is enabled
+            if (useVoice && responseText) {
+              console.log('Generating speech for response...');
+              await generateAndPlaySpeechInternal(responseText);
+            }
+
+            onResponse?.(responseText);
+          } else {
+            console.warn('No response text received from assistant');
           }
-
-          onResponse?.(responseText);
           return;
         }
 
@@ -276,59 +354,93 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
 
       } catch (error) {
         console.error('Error polling assistant status:', error);
-        onError?.(error.message);
+        onError?.(error.message || 'Polling failed');
       }
     };
 
     poll();
+  };
+
+  const pollForCompletion = useCallback(async (runId: string) => {
+    if (session) {
+      await pollForCompletionInternal(runId, session);
+    }
   }, [session, useVoice, onResponse, onError]);
 
-  const processWithDirectChat = useCallback(async (message: string) => {
-    if (!session?.conversationId) return;
+  // Internal direct chat processing without circular dependencies
+  const processWithDirectChatInternal = async (message: string, currentSession: VoiceSession) => {
+    if (!currentSession?.conversationId) {
+      console.warn('Cannot process with direct chat: missing conversation ID');
+      return;
+    }
 
     try {
+      console.log('Processing with direct chat...');
       const { data, error } = await supabase.functions.invoke('openai-voice-chat', {
         body: {
-          conversationId: session.conversationId,
+          conversationId: currentSession.conversationId,
           message,
           useVoice,
           voice
         }
       });
 
-      if (error) throw error;
-
-      const responseText = data.response;
-      const audioContent = data.audioContent;
-
-      // Add assistant message to local state
-      const assistantMessage = {
-        role: 'assistant' as const,
-        content: responseText,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, assistantMessage]);
-
-      // Play audio if available
-      if (audioContent) {
-        await playAudioFromBase64(audioContent);
+      if (error) {
+        console.error('Direct chat error:', error);
+        throw error;
       }
 
-      onResponse?.(responseText, audioContent);
+      const responseText = data?.response;
+      const audioContent = data?.audioContent;
+      console.log('Direct chat response:', responseText);
+
+      if (responseText) {
+        // Add assistant message to local state
+        const assistantMessage = {
+          role: 'assistant' as const,
+          content: responseText,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+
+        // Play audio if available
+        if (audioContent) {
+          console.log('Playing audio response...');
+          await playAudioFromBase64(audioContent);
+        }
+
+        onResponse?.(responseText, audioContent);
+      } else {
+        console.warn('No response text received from direct chat');
+      }
 
     } catch (error) {
       console.error('Error processing with direct chat:', error);
-      onError?.(error.message);
+      onError?.(error.message || 'Direct chat processing failed');
+    }
+  };
+
+  const processWithDirectChat = useCallback(async (message: string) => {
+    if (session) {
+      await processWithDirectChatInternal(message, session);
     }
   }, [session, useVoice, voice, onResponse, onError]);
 
-  const generateAndPlaySpeech = useCallback(async (text: string) => {
+  // Internal speech generation without circular dependencies
+  const generateAndPlaySpeechInternal = async (text: string) => {
+    const currentSession = session;
+    if (!currentSession?.conversationId) {
+      console.warn('Cannot generate speech: no active session');
+      return;
+    }
+
     try {
+      console.log('Generating speech...');
       setSession(prev => prev ? { ...prev, isSpeaking: true } : null);
 
       const { data, error } = await supabase.functions.invoke('openai-voice-chat', {
         body: {
-          conversationId: session?.conversationId,
+          conversationId: currentSession.conversationId,
           message: '', // Empty message for TTS only
           useVoice: true,
           voice,
@@ -337,10 +449,16 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Speech generation error:', error);
+        throw error;
+      }
 
-      if (data.audioContent) {
+      if (data?.audioContent) {
+        console.log('Playing generated speech...');
         await playAudioFromBase64(data.audioContent);
+      } else {
+        console.warn('No audio content received from TTS');
       }
 
     } catch (error) {
@@ -348,7 +466,11 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
     } finally {
       setSession(prev => prev ? { ...prev, isSpeaking: false } : null);
     }
-  }, [session, voice]);
+  };
+
+  const generateAndPlaySpeech = useCallback(async (text: string) => {
+    await generateAndPlaySpeechInternal(text);
+  }, [voice]);
 
   const playAudioFromBase64 = useCallback(async (base64Audio: string) => {
     try {
