@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
 import { useOpenAIVoice } from '@/hooks/useOpenAIVoice';
+import { supabase } from '@/integrations/supabase/client';
 import { Mic, MicOff, Send, MessageCircle, Brain, Volume2, VolumeX } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +29,7 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [isStarting, setIsStarting] = useState(false);
   const [learningMetrics, setLearningMetrics] = useState({
     vocabulary: 0,
     engagement: 0,
@@ -74,35 +76,42 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
   }, [session, conversationId, onVoiceSessionStart]);
 
   const handleStartSession = async () => {
+    if (isStarting) return;
+    
     try {
-      // Create a new conversation in the database first
-      const response = await fetch('/api/conversations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      setIsStarting(true);
+      
+      // Create a new conversation using Supabase edge function
+      const { data, error } = await supabase.functions.invoke('create-conversation', {
+        body: {
           specialtyFocus,
           quizSessionId,
           sessionType: 'enhanced_voice_learning'
-        })
+        }
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to create conversation');
+      if (error) {
+        throw error;
       }
 
-      const { conversationId: newConversationId } = await response.json();
+      const newConversationId = data.conversationId;
       setConversationId(newConversationId);
       await startSession(newConversationId);
+
+      toast({
+        title: "Session Started",
+        description: "AI Voice Learning session is now active",
+      });
 
     } catch (error) {
       console.error('Error starting enhanced voice session:', error);
       toast({
         title: "Error",
-        description: "Failed to start voice learning session",
+        description: `Failed to start voice learning session: ${error.message}`,
         variant: "destructive",
       });
+    } finally {
+      setIsStarting(false);
     }
   };
 
@@ -188,11 +197,12 @@ const EnhancedVoiceLearning: React.FC<Props> = ({
             {!isConnected ? (
               <Button 
                 onClick={handleStartSession}
+                disabled={isStarting}
                 size="lg"
                 className="bg-primary hover:bg-primary/90"
               >
                 <MessageCircle className="mr-2 h-4 w-4" />
-                Start AI Voice Session
+                {isStarting ? "Starting..." : "Start AI Voice Session"}
               </Button>
             ) : (
               <>

@@ -66,7 +66,7 @@ const VoiceLearningInterface: React.FC<Props> = ({
       setIsListening(true);
       sessionStartTime.current = Date.now();
 
-      // Get a default voice personality
+      // Get a default voice personality or use default ID
       const { data: personality } = await supabase
         .from('voice_personalities')
         .select('id')
@@ -78,10 +78,11 @@ const VoiceLearningInterface: React.FC<Props> = ({
       const { data: conversation, error } = await supabase
         .from('conversations')
         .insert({
-          voice_personality_id: personality?.id || '00000000-0000-0000-0000-000000000000',
+          voice_personality_id: personality?.id || '11111111-1111-1111-1111-111111111111',
           voice_session_type: quizSessionId ? 'quiz_assistance' : 'learning',
           specialty_focus: specialtyFocus,
           quiz_session_id: quizSessionId,
+          user_id: null, // Allow null user_id for voice sessions
           learning_context: {
             sessionType: 'voice_learning',
             startTime: new Date().toISOString(),
