@@ -163,7 +163,7 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   }, []);
 
   // Internal audio processing without circular dependencies
-  const processAudioBlobInternal = async (audioBlob: Blob) => {
+  const processAudioBlobInternal = useCallback(async (audioBlob: Blob) => {
     const currentSession = session;
     if (!currentSession?.conversationId) {
       console.warn('Cannot process audio: no active session');
@@ -217,7 +217,7 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
       };
       setMessages(prev => [...prev, userMessage]);
 
-      // Send to OpenAI assistant if we have a thread
+      // Send to OpenAI assistant if we have a thread - using internal functions directly
       if (currentSession.threadId) {
         console.log('Processing with assistant...');
         await processWithAssistantInternal(transcription, currentSession);
@@ -237,7 +237,7 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
     } finally {
       setSession(prev => prev ? { ...prev, isProcessing: false } : null);
     }
-  };
+  }, [session?.conversationId, session?.threadId, onTranscription, onError, toast]);
 
   const processAudioBlob = useCallback(async (audioBlob: Blob) => {
     await processAudioBlobInternal(audioBlob);
