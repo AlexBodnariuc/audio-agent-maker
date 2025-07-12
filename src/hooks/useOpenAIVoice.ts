@@ -96,7 +96,8 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   }, [toast]);
 
   const startListening = useCallback(async () => {
-    if (!session) {
+    const currentSession = session;
+    if (!currentSession) {
       console.warn('Cannot start listening: no active session');
       return;
     }
@@ -127,13 +128,16 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
         }
       };
 
-      mediaRecorderRef.current.onstop = async () => {
+      mediaRecorderRef.current.onstop = () => {
         console.log('Recording stopped, processing audio...');
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         console.log('Audio blob created:', audioBlob.size, 'bytes');
         
-        // Process audio without circular dependency
-        await processAudioBlobInternal(audioBlob);
+        // Process audio without blocking and without circular dependency
+        processAudioBlobInternal(audioBlob).catch(error => {
+          console.error('Error processing audio:', error);
+          onError?.(error.message || 'Failed to process audio');
+        });
       };
 
       mediaRecorderRef.current.start();
@@ -149,7 +153,7 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
         variant: "destructive",
       });
     }
-  }, [session?.conversationId, onError, toast]);
+  }, [session?.conversationId]);
 
   const stopListening = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -237,7 +241,7 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
 
   const processAudioBlob = useCallback(async (audioBlob: Blob) => {
     await processAudioBlobInternal(audioBlob);
-  }, []);
+  }, [session?.conversationId]);
 
   // Internal assistant processing without circular dependencies
   const processWithAssistantInternal = async (message: string, currentSession: VoiceSession) => {
@@ -279,10 +283,11 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   };
 
   const processWithAssistant = useCallback(async (message: string) => {
-    if (session) {
-      await processWithAssistantInternal(message, session);
+    const currentSession = session;
+    if (currentSession) {
+      await processWithAssistantInternal(message, currentSession);
     }
-  }, [session, onError]);
+  }, [session?.conversationId, session?.threadId]);
 
   // Internal polling without circular dependencies
   const pollForCompletionInternal = async (runId: string, currentSession: VoiceSession) => {
@@ -362,10 +367,11 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   };
 
   const pollForCompletion = useCallback(async (runId: string) => {
-    if (session) {
-      await pollForCompletionInternal(runId, session);
+    const currentSession = session;
+    if (currentSession) {
+      await pollForCompletionInternal(runId, currentSession);
     }
-  }, [session, useVoice, onResponse, onError]);
+  }, [session?.conversationId, session?.threadId]);
 
   // Internal direct chat processing without circular dependencies
   const processWithDirectChatInternal = async (message: string, currentSession: VoiceSession) => {
@@ -421,10 +427,11 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   };
 
   const processWithDirectChat = useCallback(async (message: string) => {
-    if (session) {
-      await processWithDirectChatInternal(message, session);
+    const currentSession = session;
+    if (currentSession) {
+      await processWithDirectChatInternal(message, currentSession);
     }
-  }, [session, useVoice, voice, onResponse, onError]);
+  }, [session?.conversationId, useVoice, voice]);
 
   // Internal speech generation without circular dependencies
   const generateAndPlaySpeechInternal = async (text: string) => {
@@ -470,7 +477,7 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
 
   const generateAndPlaySpeech = useCallback(async (text: string) => {
     await generateAndPlaySpeechInternal(text);
-  }, [voice]);
+  }, [session?.conversationId, voice]);
 
   const playAudioFromBase64 = useCallback(async (base64Audio: string) => {
     try {
@@ -499,7 +506,8 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   }, []);
 
   const sendTextMessage = useCallback(async (text: string) => {
-    if (!session?.conversationId) return;
+    const currentSession = session;
+    if (!currentSession?.conversationId) return;
 
     try {
       setSession(prev => prev ? { ...prev, isProcessing: true } : null);
@@ -512,11 +520,11 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
       };
       setMessages(prev => [...prev, userMessage]);
 
-      // Process with assistant or direct chat
-      if (session.threadId) {
-        await processWithAssistant(text);
+      // Process with assistant or direct chat using internal functions directly
+      if (currentSession.threadId) {
+        await processWithAssistantInternal(text, currentSession);
       } else {
-        await processWithDirectChat(text);
+        await processWithDirectChatInternal(text, currentSession);
       }
 
     } catch (error) {
@@ -525,7 +533,7 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
     } finally {
       setSession(prev => prev ? { ...prev, isProcessing: false } : null);
     }
-  }, [session, processWithAssistant, processWithDirectChat, onError]);
+  }, [session?.conversationId, session?.threadId]);
 
   return {
     session,
