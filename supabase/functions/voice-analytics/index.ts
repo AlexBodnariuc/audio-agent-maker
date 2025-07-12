@@ -17,6 +17,8 @@ interface AnalyticsRequest {
   };
   learningTopics?: string[];
   comprehensionIndicators?: any;
+  wordCount?: number;
+  medicalTermsUsed?: string[];
 }
 
 serve(async (req) => {
@@ -41,7 +43,9 @@ serve(async (req) => {
       sessionDuration, 
       voiceMetrics, 
       learningTopics, 
-      comprehensionIndicators 
+      comprehensionIndicators,
+      wordCount,
+      medicalTermsUsed
     }: AnalyticsRequest = await req.json();
 
     if (!conversationId) {
@@ -58,23 +62,30 @@ serve(async (req) => {
       .single();
 
     if (convError) {
+      console.error('Failed to get conversation:', convError);
       throw new Error(`Failed to get conversation: ${convError.message}`);
     }
 
-    // Update voice analytics
+    // Prepare analytics data with better structure
+    const analyticsData = {
+      conversation_id: conversationId,
+      user_id: conversation.user_id,
+      email_session_id: conversation.email_session_id,
+      session_duration: sessionDuration || 0,
+      voice_metrics: voiceMetrics || {},
+      learning_topics: learningTopics || [],
+      comprehension_indicators: comprehensionIndicators || {},
+      word_count: wordCount || 0,
+      medical_terms_used: medicalTermsUsed || [],
+      updated_at: new Date().toISOString()
+    };
+
+    // Use INSERT with ON CONFLICT to handle unique constraint properly
     const { data, error } = await supabase
       .from('voice_analytics')
-      .upsert({
-        conversation_id: conversationId,
-        user_id: conversation.user_id,
-        email_session_id: conversation.email_session_id,
-        session_duration: sessionDuration,
-        voice_metrics: voiceMetrics,
-        learning_topics: learningTopics || [],
-        comprehension_indicators: comprehensionIndicators || {},
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'conversation_id'
+      .upsert(analyticsData, {
+        onConflict: 'conversation_id',
+        ignoreDuplicates: false
       });
 
     if (error) {
@@ -82,13 +93,21 @@ serve(async (req) => {
       throw new Error(`Database error: ${error.message}`);
     }
 
-    // Generate learning insights
-    const insights = await generateLearningInsights(supabase, conversationId, conversation);
+    // Generate learning insights with error handling
+    let insights = {};
+    try {
+      insights = await generateLearningInsights(supabase, conversationId, conversation);
+    } catch (insightError) {
+      console.error('Error generating insights:', insightError);
+      // Continue without insights rather than failing completely
+      insights = { error: 'Failed to generate insights' };
+    }
 
     console.log(`Successfully updated voice analytics for conversation ${conversationId}`);
 
     return new Response(JSON.stringify({ 
       success: true,
+      data: analyticsData,
       insights
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -108,68 +127,104 @@ serve(async (req) => {
 
 async function generateLearningInsights(supabase: any, conversationId: string, conversation: any) {
   try {
-    // Get analytics data
-    const { data: analytics } = await supabase
+    // Get analytics data with error handling
+    const { data: analytics, error: analyticsError } = await supabase
       .from('voice_analytics')
       .select('*')
       .eq('conversation_id', conversationId)
       .single();
 
-    if (!analytics) return {};
+    if (analyticsError || !analytics) {
+      console.log('No analytics data found for insights generation');
+      return { message: 'No analytics data available for insights' };
+    }
 
-    // Calculate learning metrics
+    // Calculate learning metrics with safe defaults
     const insights = {
       engagementLevel: calculateEngagementLevel(analytics),
       learningEffectiveness: calculateLearningEffectiveness(analytics),
       recommendedTopics: await getRecommendedTopics(supabase, conversation, analytics),
-      progressIndicators: calculateProgressIndicators(analytics)
+      progressIndicators: calculateProgressIndicators(analytics),
+      timestamp: new Date().toISOString()
     };
 
     return insights;
   } catch (error) {
     console.error('Error generating insights:', error);
-    return {};
+    return { error: 'Failed to generate learning insights' };
   }
 }
 
 function calculateEngagementLevel(analytics: any): string {
-  const wordCount = analytics.word_count || 0;
-  const sessionDuration = analytics.session_duration || 1;
-  const wordsPerMinute = (wordCount / sessionDuration) * 60;
+  try {
+    const wordCount = analytics.word_count || 0;
+    const sessionDuration = analytics.session_duration || 1;
+    const wordsPerMinute = sessionDuration > 0 ? (wordCount / sessionDuration) * 60 : 0;
 
-  if (wordsPerMinute > 120) return 'high';
-  if (wordsPerMinute > 60) return 'medium';
-  return 'low';
+    if (wordsPerMinute > 120) return 'high';
+    if (wordsPerMinute > 60) return 'medium';
+    return 'low';
+  } catch (error) {
+    console.error('Error calculating engagement level:', error);
+    return 'unknown';
+  }
 }
 
 function calculateLearningEffectiveness(analytics: any): number {
-  const medicalTermsCount = analytics.medical_terms_used?.length || 0;
-  const wordCount = analytics.word_count || 1;
-  const medicalTermsRatio = medicalTermsCount / wordCount;
+  try {
+    const medicalTermsCount = analytics.medical_terms_used?.length || 0;
+    const wordCount = analytics.word_count || 1;
+    const medicalTermsRatio = wordCount > 0 ? medicalTermsCount / wordCount : 0;
 
-  // Simple effectiveness score based on medical terminology usage
-  return Math.min(medicalTermsRatio * 100, 100);
+    // Simple effectiveness score based on medical terminology usage
+    return Math.min(Math.round(medicalTermsRatio * 100), 100);
+  } catch (error) {
+    console.error('Error calculating learning effectiveness:', error);
+    return 0;
+  }
 }
 
 async function getRecommendedTopics(supabase: any, conversation: any, analytics: any): Promise<string[]> {
-  const specialtyFocus = conversation.specialty_focus || 'general';
-  const usedTerms = analytics.medical_terms_used || [];
+  try {
+    const specialtyFocus = conversation.specialty_focus || 'general';
+    const usedTerms = analytics.medical_terms_used || [];
 
-  // Based on specialty and current usage, recommend topics
-  const topicRecommendations: Record<string, string[]> = {
-    'cardiology': ['heart anatomy', 'cardiac procedures', 'ECG interpretation', 'cardiac medications'],
-    'neurology': ['brain anatomy', 'neurological examination', 'stroke management', 'seizure disorders'],
-    'general': ['basic anatomy', 'vital signs', 'common medications', 'patient communication']
-  };
+    // Based on specialty and current usage, recommend topics
+    const topicRecommendations: Record<string, string[]> = {
+      'cardiology': ['heart anatomy', 'cardiac procedures', 'ECG interpretation', 'cardiac medications'],
+      'neurology': ['brain anatomy', 'neurological examination', 'stroke management', 'seizure disorders'],
+      'pulmonology': ['respiratory anatomy', 'lung function tests', 'asthma management', 'ventilator settings'],
+      'emergency': ['ACLS protocols', 'trauma assessment', 'shock management', 'emergency procedures'],
+      'general': ['basic anatomy', 'vital signs', 'common medications', 'patient communication']
+    };
 
-  return topicRecommendations[specialtyFocus] || topicRecommendations['general'];
+    return topicRecommendations[specialtyFocus] || topicRecommendations['general'];
+  } catch (error) {
+    console.error('Error getting recommended topics:', error);
+    return ['basic anatomy', 'vital signs', 'patient communication'];
+  }
 }
 
 function calculateProgressIndicators(analytics: any): any {
-  return {
-    vocabularyGrowth: analytics.medical_terms_used?.length || 0,
-    sessionCount: 1, // This would be calculated from historical data
-    averageSessionDuration: analytics.session_duration || 0,
-    confidenceImprovement: analytics.voice_metrics?.confidence || 0
-  };
+  try {
+    return {
+      vocabularyGrowth: analytics.medical_terms_used?.length || 0,
+      sessionCount: 1, // This would be calculated from historical data
+      averageSessionDuration: analytics.session_duration || 0,
+      confidenceImprovement: analytics.voice_metrics?.confidence || 0,
+      engagementMetrics: {
+        wordCount: analytics.word_count || 0,
+        medicalTermsUsed: analytics.medical_terms_used?.length || 0,
+        topicsExplored: analytics.learning_topics?.length || 0
+      }
+    };
+  } catch (error) {
+    console.error('Error calculating progress indicators:', error);
+    return {
+      vocabularyGrowth: 0,
+      sessionCount: 0,
+      averageSessionDuration: 0,
+      confidenceImprovement: 0
+    };
+  }
 }
