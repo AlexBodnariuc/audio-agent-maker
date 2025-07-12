@@ -28,7 +28,7 @@ interface Props {
 const SemanticSearchPanel: React.FC<Props> = ({ className }) => {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
-  const [specialtyFilter, setSpecialtyFilter] = useState<string>('');
+  const [specialtyFilter, setSpecialtyFilter] = useState<string>('all');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [totalResults, setTotalResults] = useState(0);
@@ -62,7 +62,7 @@ const SemanticSearchPanel: React.FC<Props> = ({ className }) => {
       const { data, error } = await supabase.functions.invoke('semantic-search', {
         body: {
           query: query.trim(),
-          specialtyFilter: specialtyFilter || undefined,
+          specialtyFilter: specialtyFilter === 'all' ? undefined : specialtyFilter,
           matchThreshold: 0.7,
           matchCount: 20
         }
@@ -149,7 +149,7 @@ const SemanticSearchPanel: React.FC<Props> = ({ className }) => {
                 <SelectValue placeholder="All specialties" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All specialties</SelectItem>
+                <SelectItem value="all">All specialties</SelectItem>
                 {specialties.map((specialty) => (
                   <SelectItem key={specialty} value={specialty}>
                     {specialty.charAt(0).toUpperCase() + specialty.slice(1)}
