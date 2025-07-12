@@ -8,42 +8,56 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
+    /* MedMentor Light Theme - Medical Education Colors */
+    --background: 210 40% 98%;
+    --foreground: 220 20% 15%;
 
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 15%;
 
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 15%;
 
-    --primary: 263 70% 50%;
-    --primary-foreground: 0 0% 98%;
-    --primary-glow: 263 70% 65%;
+    /* Medical theme: Blue for trust/medicine, Green for success/growth */
+    --primary: 220 90% 55%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 220 90% 70%;
 
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
+    --secondary: 160 60% 45%;
+    --secondary-foreground: 0 0% 100%;
 
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 220 20% 45%;
 
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 35 100% 50%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 263 70% 50%;
+    --border: 220 15% 85%;
+    --input: 220 15% 90%;
+    --ring: 220 90% 55%;
 
     --radius: 0.75rem;
 
-    /* Custom design tokens */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
-    --gradient-hero: linear-gradient(135deg, hsl(240 10% 3.9%) 0%, hsl(240 5% 6%) 100%);
-    --shadow-glow: 0 0 40px hsl(var(--primary-glow) / 0.3);
-    --shadow-elegant: 0 10px 30px -10px hsl(var(--primary) / 0.5);
+    /* Romanian medical education theme */
+    --medical-blue: 220 90% 55%;
+    --medical-green: 160 60% 45%;
+    --medical-yellow: 35 100% 50%;
+    --medical-red: 350 85% 55%;
+    --medical-purple: 270 70% 55%;
+
+    /* Custom gradients for medical theme */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--medical-blue)), hsl(var(--primary-glow)));
+    --gradient-success: linear-gradient(135deg, hsl(var(--medical-green)), hsl(160 60% 60%));
+    --gradient-hero: linear-gradient(135deg, hsl(210 40% 98%) 0%, hsl(220 40% 95%) 100%);
+    --gradient-quiz: linear-gradient(135deg, hsl(var(--medical-blue) / 0.1), hsl(var(--medical-green) / 0.1));
+    
+    /* Enhanced shadows for medical interface */
+    --shadow-glow: 0 0 30px hsl(var(--primary-glow) / 0.2);
+    --shadow-elegant: 0 8px 25px -8px hsl(var(--medical-blue) / 0.3);
+    --shadow-quiz: 0 4px 15px hsl(var(--medical-blue) / 0.15);
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
     --sidebar-background: 0 0% 98%;
@@ -64,33 +78,52 @@ All colors MUST be HSL.
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    /* MedMentor Dark Theme - Medical Education Colors */
+    --background: 220 25% 8%;
+    --foreground: 210 40% 95%;
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    --card: 220 25% 10%;
+    --card-foreground: 210 40% 95%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 220 25% 10%;
+    --popover-foreground: 210 40% 95%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 220 90% 65%;
+    --primary-foreground: 220 25% 8%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 160 50% 50%;
+    --secondary-foreground: 220 25% 8%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 220 25% 15%;
+    --muted-foreground: 220 15% 60%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 35 100% 55%;
+    --accent-foreground: 220 25% 8%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 84% 65%;
+    --destructive-foreground: 220 25% 8%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border: 220 25% 20%;
+    --input: 220 25% 15%;
+    --ring: 220 90% 65%;
+
+    /* Dark medical colors */
+    --medical-blue: 220 90% 65%;
+    --medical-green: 160 50% 50%;
+    --medical-yellow: 35 100% 55%;
+    --medical-red: 350 85% 60%;
+    --medical-purple: 270 70% 60%;
+
+    /* Dark theme gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--medical-blue)), hsl(220 90% 75%));
+    --gradient-success: linear-gradient(135deg, hsl(var(--medical-green)), hsl(160 50% 60%));
+    --gradient-hero: linear-gradient(135deg, hsl(220 25% 8%) 0%, hsl(220 25% 12%) 100%);
+    --gradient-quiz: linear-gradient(135deg, hsl(var(--medical-blue) / 0.1), hsl(var(--medical-green) / 0.1));
+    
+    /* Dark shadows */
+    --shadow-glow: 0 0 30px hsl(var(--medical-blue) / 0.3);
+    --shadow-elegant: 0 8px 25px -8px hsl(var(--medical-blue) / 0.4);
+    --shadow-quiz: 0 4px 15px hsl(var(--medical-blue) / 0.2);
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;
