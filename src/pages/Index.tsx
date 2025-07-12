@@ -6,9 +6,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AgentForm from "@/components/AgentForm";
 import CodeViewer from "@/components/CodeViewer";
 import VoiceLearningInterface from "@/components/voice/VoiceLearningInterface";
+import EnhancedVoiceLearning from "@/components/voice/EnhancedVoiceLearning";
 import SemanticSearchPanel from "@/components/voice/SemanticSearchPanel";
 import LearningPathManager from "@/components/voice/LearningPathManager";
-import { Bot, Sparkles, Zap, Github, Database, Shield, Mic, Code, FileCode, Download, Brain, Search, Map } from "lucide-react";
+import { Bot, Sparkles, Zap, Github, Database, Shield, Mic, Code, FileCode, Download, Brain, Search, Map, MessageCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface AgentFormData {
@@ -335,7 +336,7 @@ export default function Index() {
           {/* Enhanced Interface with Tabs */}
           <div className="max-w-7xl mx-auto mb-16">
             <Tabs defaultValue="builder" className="w-full">
-              <TabsList className="grid w-full grid-cols-4 mb-8">
+              <TabsList className="grid w-full grid-cols-5 mb-8">
                 <TabsTrigger value="builder" className="flex items-center gap-2">
                   <Code className="h-4 w-4" />
                   Agent Builder
@@ -343,6 +344,10 @@ export default function Index() {
                 <TabsTrigger value="voice" className="flex items-center gap-2">
                   <Brain className="h-4 w-4" />
                   Voice Learning
+                </TabsTrigger>
+                <TabsTrigger value="enhanced-voice" className="flex items-center gap-2">
+                  <MessageCircle className="h-4 w-4" />
+                  AI Voice Chat
                 </TabsTrigger>
                 <TabsTrigger value="search" className="flex items-center gap-2">
                   <Search className="h-4 w-4" />
@@ -367,6 +372,10 @@ export default function Index() {
 
               <TabsContent value="voice">
                 <VoiceLearningInterface specialtyFocus="general" />
+              </TabsContent>
+
+              <TabsContent value="enhanced-voice">
+                <EnhancedVoiceLearning specialtyFocus="general" />
               </TabsContent>
 
               <TabsContent value="search">
