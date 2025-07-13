@@ -254,7 +254,7 @@ export default function AgentTestingPanel({
       console.error('Error getting AI response:', error);
       toast({
         title: "Eroare",
-        description: "Nu am putut obține răspunsul AI",
+        description: error.message || "Nu am putut obține răspunsul AI",
         variant: "destructive",
       });
     } finally {
