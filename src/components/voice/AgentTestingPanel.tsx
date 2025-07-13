@@ -206,14 +206,11 @@ export default function AgentTestingPanel({
         'openai-voice-chat',
         {
           body: {
-            message: userText,
             conversationId: conversationId,
-            context: {
-              specialty: agent.medical_specialty,
-              agent_name: agent.name,
-              agent_description: agent.description,
-              session_type: 'testing'
-            }
+            message: userText,
+            specialtyFocus: agent.medical_specialty,
+            useVoice: true,
+            voice: 'alloy'
           }
         }
       );

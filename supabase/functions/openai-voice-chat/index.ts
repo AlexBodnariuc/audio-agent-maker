@@ -37,7 +37,9 @@ serve(async (req) => {
     let requestBody;
     try {
       requestBody = await req.json();
+      console.log('Received request body:', JSON.stringify(requestBody, null, 2));
     } catch (error) {
+      console.error('Failed to parse request body:', error);
       throw new Error('Invalid JSON in request body');
     }
 
@@ -51,10 +53,12 @@ serve(async (req) => {
 
     // Validate required parameters
     if (!conversationId) {
+      console.error('Missing conversationId in request:', requestBody);
       throw new Error('conversationId is required');
     }
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      console.error('Invalid message in request:', { message, type: typeof message, requestBody });
       throw new Error('message is required and must be a non-empty string');
     }
 
