@@ -123,13 +123,44 @@ serve(async (req) => {
     // Upgrade to WebSocket
     const { socket, response } = Deno.upgradeWebSocket(req);
     
-    // Connect to OpenAI Realtime API
+    // Session state management
     let openAISocket: WebSocket | null = null;
-    let sessionActive = false;
+    let sessionState = 'disconnected'; // disconnected, connecting, configuring, ready, error
+    let messageQueue: string[] = []; // Queue messages until session is ready
+    let lastHeartbeat = Date.now();
+    
+    // Heartbeat to detect connection issues
+    const heartbeatInterval = setInterval(() => {
+      const now = Date.now();
+      if (now - lastHeartbeat > 30000) { // 30 seconds timeout
+        console.warn('Heartbeat timeout, attempting reconnection');
+        if (sessionState !== 'error') {
+          sessionState = 'error';
+          socket.send(JSON.stringify({
+            type: 'session_error',
+            message: 'Conexiunea s-a întrerupt. Se reîncearc&acaron;...'
+          }));
+        }
+      }
+    }, 10000);
+
+    const processMessageQueue = () => {
+      if (sessionState === 'ready' && openAISocket && openAISocket.readyState === WebSocket.OPEN) {
+        while (messageQueue.length > 0) {
+          const queuedMessage = messageQueue.shift();
+          if (queuedMessage) {
+            openAISocket.send(queuedMessage);
+            console.log('Processed queued message');
+          }
+        }
+      }
+    };
 
     socket.onopen = async () => {
       try {
         console.log('Client WebSocket connected');
+        sessionState = 'connecting';
+        lastHeartbeat = Date.now();
         
         // Connect to OpenAI Realtime API
         const openAIUrl = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
@@ -142,6 +173,7 @@ serve(async (req) => {
 
         openAISocket.onopen = () => {
           console.log('Connected to OpenAI Realtime API');
+          sessionState = 'configuring';
           socket.send(JSON.stringify({
             type: 'connection_established',
             message: 'Conectat la OpenAI Realtime API'
@@ -151,13 +183,13 @@ serve(async (req) => {
         openAISocket.onmessage = async (event) => {
           try {
             const data = JSON.parse(event.data);
-            console.log('OpenAI message type:', data.type);
+            lastHeartbeat = Date.now();
+            console.log('OpenAI message type:', data.type, 'Session state:', sessionState);
 
-            // Handle session.created event
+            // Handle session initialization sequence
             if (data.type === 'session.created') {
-              sessionActive = true;
+              console.log('Session created, sending configuration...');
               
-              // Send session configuration
               const sessionConfig = {
                 type: 'session.update',
                 session: {
@@ -184,12 +216,44 @@ serve(async (req) => {
               console.log('Session configuration sent');
             }
 
+            // Handle session.updated - session is now ready
+            if (data.type === 'session.updated') {
+              console.log('Session configured successfully, now ready for audio');
+              sessionState = 'ready';
+              
+              socket.send(JSON.stringify({
+                type: 'session_ready',
+                message: 'Sesiunea este gata - poți începe să vorbești!'
+              }));
+              
+              // Process any queued messages
+              processMessageQueue();
+            }
+
+            // Handle error recovery
+            if (data.type === 'error') {
+              console.error('OpenAI error:', data);
+              sessionState = 'error';
+              
+              // Attempt to recover after a delay
+              setTimeout(() => {
+                if (sessionState === 'error' && openAISocket) {
+                  console.log('Attempting session recovery...');
+                  sessionState = 'configuring';
+                  socket.send(JSON.stringify({
+                    type: 'session_recovery',
+                    message: 'Se reîncearc&acaron; conectarea...'
+                  }));
+                }
+              }, 2000);
+            }
+
             // Handle function calls or tool usage if needed
             if (data.type === 'response.function_call_arguments.done') {
               console.log('Function call completed:', data.arguments);
             }
 
-            // Store conversation messages
+            // Store conversation messages for key interactions
             if (data.type === 'conversation.item.created' && data.item?.content) {
               await storeConversationMessage(
                 supabase, 
@@ -202,7 +266,8 @@ serve(async (req) => {
                   confidence_score: data.item.confidence_score,
                   voice_metadata: {
                     voice: validVoice,
-                    specialty_focus: validSpecialty
+                    specialty_focus: validSpecialty,
+                    session_state: sessionState
                   }
                 }
               );
@@ -213,67 +278,112 @@ serve(async (req) => {
 
           } catch (error) {
             console.error('Error processing OpenAI message:', error);
+            sessionState = 'error';
             socket.send(JSON.stringify({
-              type: 'error',
-              message: 'Eroare în procesarea mesajului'
+              type: 'processing_error',
+              message: 'Eroare în procesarea mesajului',
+              canRetry: true
             }));
           }
         };
 
         openAISocket.onerror = (error) => {
           console.error('OpenAI WebSocket error:', error);
+          sessionState = 'error';
           socket.send(JSON.stringify({
-            type: 'error',
-            message: 'Eroare de conexiune cu OpenAI'
+            type: 'connection_error',
+            message: 'Eroare de conexiune cu OpenAI',
+            canRetry: true
           }));
         };
 
-        openAISocket.onclose = () => {
-          console.log('OpenAI WebSocket closed');
-          sessionActive = false;
+        openAISocket.onclose = (event) => {
+          console.log('OpenAI WebSocket closed', event.code, event.reason);
+          const wasReady = sessionState === 'ready';
+          sessionState = 'disconnected';
+          
           socket.send(JSON.stringify({
             type: 'session_ended',
-            message: 'Sesiunea s-a închis'
+            message: wasReady ? 'Sesiunea s-a închis' : 'Conexiunea s-a întrerupt',
+            wasEstablished: wasReady
           }));
         };
 
       } catch (error) {
         console.error('Error establishing OpenAI connection:', error);
+        sessionState = 'error';
         socket.send(JSON.stringify({
-          type: 'error',
-          message: 'Nu s-a putut conecta la OpenAI'
+          type: 'initialization_error',
+          message: 'Nu s-a putut inițializa conexiunea cu OpenAI',
+          canRetry: true
         }));
       }
     };
 
-    // Handle messages from client
+    // Handle messages from client with proper queuing
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        const messageStr = JSON.stringify(data);
         
-        // Forward client messages to OpenAI if session is active
-        if (sessionActive && openAISocket && openAISocket.readyState === WebSocket.OPEN) {
-          openAISocket.send(JSON.stringify(data));
+        // Handle client control messages
+        if (data.type === 'ping') {
+          socket.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+          return;
+        }
+        
+        if (data.type === 'session_status_request') {
+          socket.send(JSON.stringify({ 
+            type: 'session_status', 
+            state: sessionState,
+            queueLength: messageQueue.length,
+            timestamp: Date.now()
+          }));
+          return;
+        }
+        
+        // Queue or forward audio messages based on session state
+        if (sessionState === 'ready' && openAISocket && openAISocket.readyState === WebSocket.OPEN) {
+          openAISocket.send(messageStr);
           console.log('Forwarded message to OpenAI:', data.type);
+        } else if (sessionState === 'configuring' || sessionState === 'connecting') {
+          // Queue non-critical messages
+          if (data.type === 'input_audio_buffer.append' && messageQueue.length < 100) {
+            messageQueue.push(messageStr);
+            console.log('Queued audio message, queue length:', messageQueue.length);
+          } else {
+            console.log('Session not ready, message dropped:', data.type);
+            socket.send(JSON.stringify({
+              type: 'session_not_ready',
+              message: 'Sesiunea se încă configurează...',
+              sessionState: sessionState
+            }));
+          }
         } else {
-          console.warn('Session not active or OpenAI socket not ready');
+          console.warn('Session not available, current state:', sessionState);
           socket.send(JSON.stringify({
-            type: 'error',
-            message: 'Sesiunea nu este activă'
+            type: 'session_unavailable',
+            message: 'Sesiunea nu este disponibilă. Încearcă să reîncepi.',
+            sessionState: sessionState,
+            canRetry: true
           }));
         }
       } catch (error) {
         console.error('Error processing client message:', error);
         socket.send(JSON.stringify({
-          type: 'error',
-          message: 'Eroare în procesarea mesajului'
+          type: 'message_error',
+          message: 'Eroare în procesarea mesajului',
+          canRetry: true
         }));
       }
     };
 
     socket.onclose = () => {
       console.log('Client WebSocket closed');
-      sessionActive = false;
+      clearInterval(heartbeatInterval);
+      sessionState = 'disconnected';
+      messageQueue = [];
+      
       if (openAISocket && openAISocket.readyState === WebSocket.OPEN) {
         openAISocket.close();
       }
@@ -281,7 +391,10 @@ serve(async (req) => {
 
     socket.onerror = (error) => {
       console.error('Client WebSocket error:', error);
-      sessionActive = false;
+      clearInterval(heartbeatInterval);
+      sessionState = 'error';
+      messageQueue = [];
+      
       if (openAISocket && openAISocket.readyState === WebSocket.OPEN) {
         openAISocket.close();
       }

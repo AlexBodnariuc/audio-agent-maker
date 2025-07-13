@@ -22,6 +22,11 @@ interface RealtimeMessage {
   transcript?: string;
   error?: string;
   message?: string;
+  canRetry?: boolean;
+  wasEstablished?: boolean;
+  sessionState?: string;
+  queueLength?: number;
+  timestamp?: number;
 }
 
 // Audio utilities for PCM16 processing
@@ -163,11 +168,18 @@ export default function VoiceTutorPanel({
   const [responses, setResponses] = useState<string[]>([]);
   const [sessionStats, setSessionStats] = useState({ questions: 0, correct: 0, xp: 0 });
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [sessionState, setSessionState] = useState<'disconnected' | 'connecting' | 'configuring' | 'ready' | 'error'>('disconnected');
+  const [canRetry, setCanRetry] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
+  const [lastError, setLastError] = useState<string | null>(null);
+  const [autoRecordingEnabled, setAutoRecordingEnabled] = useState(false);
   
   const { toast } = useToast();
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const maxRetries = 3;
 
   // Initialize audio context
   useEffect(() => {
@@ -200,36 +212,104 @@ export default function VoiceTutorPanel({
     }
   };
 
-  // Start realtime session
+  // Start realtime session with improved error handling
   const startSession = async () => {
     try {
       setConnectionStatus('connecting');
+      setSessionState('connecting');
+      setLastError(null);
+      setRetryCount(0);
       
       const wsUrl = `wss://ybdvhqmjlztlvrfurkaf.functions.supabase.co/functions/v1/openai-realtime-voice?conversationId=${conversationId}&specialtyFocus=${specialtyFocus}&voice=${voice}`;
       wsRef.current = new WebSocket(wsUrl);
+
+      // Setup heartbeat to monitor connection health
+      const setupHeartbeat = () => {
+        if (heartbeatRef.current) {
+          clearInterval(heartbeatRef.current);
+        }
+        
+        heartbeatRef.current = setInterval(() => {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30000); // Send ping every 30 seconds
+      };
 
       wsRef.current.onopen = () => {
         console.log('Connected to realtime voice session');
         setIsConnected(true);
         setConnectionStatus('connected');
+        setSessionState('configuring');
+        setupHeartbeat();
         
         toast({
-          title: "Sesiune Începută! 🎙️",
-          description: "Vorbește liber - te ascult și îți răspund imediat!",
+          title: "Conectat! 🔗",
+          description: "Se configurează sesiunea vocală...",
         });
       };
 
       wsRef.current.onmessage = async (event) => {
         try {
           const data: RealtimeMessage = JSON.parse(event.data);
-          console.log('Received message:', data.type);
+          console.log('Received message:', data.type, 'Session state:', sessionState);
 
           switch (data.type) {
             case 'connection_established':
+              console.log('Connection established with OpenAI');
               break;
 
-            case 'session.created':
-              console.log('Session created successfully');
+            case 'session_ready':
+              console.log('Session is ready for audio');
+              setSessionState('ready');
+              
+              // Only now start audio recording
+              if (!autoRecordingEnabled) {
+                await startAudioRecording();
+                setAutoRecordingEnabled(true);
+              }
+              
+              toast({
+                title: "Sesiune Gata! 🎙️",
+                description: "Acum poți vorbi - te ascult și îți răspund imediat!",
+              });
+              break;
+
+            case 'session_not_ready':
+            case 'session_unavailable':
+              console.log('Session not ready:', data.message);
+              setSessionState('configuring');
+              
+              if (data.canRetry && retryCount < maxRetries) {
+                setTimeout(() => {
+                  setRetryCount(prev => prev + 1);
+                  console.log(`Retrying session... attempt ${retryCount + 1}`);
+                }, 2000);
+              }
+              break;
+
+            case 'session_error':
+            case 'connection_error':
+            case 'initialization_error':
+              console.error('Session error:', data.message);
+              setSessionState('error');
+              setLastError(data.message || 'Eroare de sesiune');
+              setCanRetry(data.canRetry || false);
+              
+              toast({
+                title: "Eroare Sesiune",
+                description: data.message || "A apărut o problemă cu sesiunea vocală",
+                variant: "destructive",
+              });
+              break;
+
+            case 'session_recovery':
+              console.log('Session recovery attempted');
+              setSessionState('configuring');
+              break;
+
+            case 'pong':
+              // Heartbeat response - connection is alive
               break;
 
             case 'response.audio.delta':
@@ -287,13 +367,22 @@ export default function VoiceTutorPanel({
               setIsRecording(false);
               break;
 
-            case 'error':
-              console.error('Realtime error:', data.message);
-              toast({
-                title: "Eroare de Conexiune",
-                description: data.message || "A apărut o problemă cu sesiunea vocală",
-                variant: "destructive",
-              });
+            case 'session_ended':
+              console.log('Session ended:', data.message);
+              const wasEstablished = data.wasEstablished || false;
+              
+              if (wasEstablished) {
+                toast({
+                  title: "Sesiune Închisă",
+                  description: "Sesiunea vocală s-a încheiat cu succes",
+                });
+              } else {
+                toast({
+                  title: "Conexiune Întreruptă",
+                  description: "Sesiunea s-a închis neașteptat",
+                  variant: "destructive",
+                });
+              }
               break;
 
             default:
@@ -313,6 +402,9 @@ export default function VoiceTutorPanel({
       wsRef.current.onerror = (error) => {
         console.error('WebSocket error:', error);
         setConnectionStatus('error');
+        setSessionState('error');
+        setLastError('Eroare de conexiune WebSocket');
+        
         toast({
           title: "Eroare de Conexiune",
           description: "Nu s-a putut conecta la serverul vocal",
@@ -320,17 +412,50 @@ export default function VoiceTutorPanel({
         });
       };
 
-      wsRef.current.onclose = () => {
-        console.log('WebSocket connection closed');
+      wsRef.current.onclose = (event) => {
+        console.log('WebSocket connection closed', event.code, event.reason);
         setIsConnected(false);
         setConnectionStatus('disconnected');
+        setSessionState('disconnected');
         setIsRecording(false);
         setIsSpeaking(false);
+        setAutoRecordingEnabled(false);
+        
+        if (heartbeatRef.current) {
+          clearInterval(heartbeatRef.current);
+          heartbeatRef.current = null;
+        }
+        
+        // Stop audio recording
+        if (recorderRef.current) {
+          recorderRef.current.stop();
+          recorderRef.current = null;
+        }
       };
 
-      // Start audio recording
+    } catch (error) {
+      console.error('Error starting session:', error);
+      setConnectionStatus('error');
+      setSessionState('error');
+      setLastError('Nu s-a putut începe sesiunea');
+      
+      toast({
+        title: "Eroare",
+        description: "Nu s-a putut începe sesiunea vocală",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Start audio recording (only called when session is ready)
+  const startAudioRecording = async () => {
+    try {
+      if (recorderRef.current) {
+        recorderRef.current.stop();
+      }
+      
       recorderRef.current = new AudioRecorder((audioData) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sessionState === 'ready') {
           const audioMessage = {
             type: 'input_audio_buffer.append',
             audio: encodeAudioForAPI(audioData)
@@ -341,16 +466,41 @@ export default function VoiceTutorPanel({
 
       await recorderRef.current.start();
       console.log('Audio recording started');
-
     } catch (error) {
-      console.error('Error starting session:', error);
-      setConnectionStatus('error');
+      console.error('Error starting audio recording:', error);
       toast({
-        title: "Eroare",
-        description: "Nu s-a putut începe sesiunea vocală",
+        title: "Eroare Microfon",
+        description: "Nu s-a putut accesa microfonul",
         variant: "destructive",
       });
     }
+  };
+
+  // Retry connection
+  const retryConnection = async () => {
+    if (retryCount >= maxRetries) {
+      toast({
+        title: "Încercări Epuizate",
+        description: "Nu s-a putut restabili conexiunea după multiple încercări",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setRetryCount(prev => prev + 1);
+    console.log(`Retrying connection... attempt ${retryCount + 1}`);
+    
+    // Close existing connection
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+    
+    // Wait a bit before retrying
+    setTimeout(() => {
+      if (retryCount < maxRetries) {
+        startSession();
+      }
+    }, 2000 * retryCount); // Exponential backoff
   };
 
   // End session
