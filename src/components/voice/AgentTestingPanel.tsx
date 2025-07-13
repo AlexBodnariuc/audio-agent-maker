@@ -70,26 +70,34 @@ export default function AgentTestingPanel({
 
   const createConversation = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('conversations')
-        .insert({
-          voice_personality_id: agent.id,
-          voice_session_type: 'testing',
-          specialty_focus: agent.medical_specialty,
-          status: 'active',
-          title: `Test cu ${agent.name}`
-        })
-        .select()
-        .single();
+      console.log('Creating conversation for agent:', agent.id);
+      
+      // Use the create-conversation edge function for better reliability
+      const { data: conversationData, error: createError } = await supabase.functions.invoke(
+        'create-conversation',
+        {
+          body: {
+            specialtyFocus: agent.medical_specialty || 'general',
+            sessionType: 'testing'
+          }
+        }
+      );
 
-      if (error) throw error;
-      setConversationId(data.id);
-      return data.id;
+      if (createError) {
+        console.error('Create conversation error:', createError);
+        throw new Error(createError.message || 'Failed to create conversation');
+      }
+
+      const conversationId = conversationData.conversationId;
+      console.log('Successfully created conversation:', conversationId);
+      
+      setConversationId(conversationId);
+      return conversationId;
     } catch (error) {
       console.error('Error creating conversation:', error);
       toast({
         title: "Eroare",
-        description: "Nu am putut începe conversația",
+        description: `Nu am putut începe conversația: ${error.message}`,
         variant: "destructive",
       });
       return null;
@@ -136,47 +144,73 @@ export default function AgentTestingPanel({
     let currentConversationId = conversationId;
     
     if (!currentConversationId) {
+      console.log('No conversation ID, creating new conversation...');
       const newConversationId = await createConversation();
-      if (!newConversationId) return;
+      if (!newConversationId) {
+        console.error('Failed to create conversation for audio processing');
+        return;
+      }
       currentConversationId = newConversationId;
     }
 
+    console.log('Processing audio for conversation:', currentConversationId);
     setIsProcessing(true);
+    
     try {
       // Convert audio to base64
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
       reader.onload = async () => {
-        const base64Audio = (reader.result as string).split(',')[1];
-        
-        // Call speech-to-text
-        const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke(
-          'openai-speech-to-text',
-          {
-            body: { 
-              audio: base64Audio,
-              conversationId: currentConversationId
+        try {
+          const base64Audio = (reader.result as string).split(',')[1];
+          console.log('Calling speech-to-text with conversation ID:', currentConversationId);
+          
+          // Call speech-to-text with proper structure
+          const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke(
+            'openai-speech-to-text',
+            {
+              body: { 
+                audio: base64Audio,
+                conversationId: currentConversationId || '',
+                language: 'ro'
+              }
             }
+          );
+
+          if (transcriptionError) {
+            console.error('Transcription error:', transcriptionError);
+            throw new Error(transcriptionError.message || 'Speech-to-text failed');
           }
-        );
 
-        if (transcriptionError) throw transcriptionError;
+          if (!transcriptionData?.text) {
+            throw new Error('No transcription text received');
+          }
 
-        const userMessage: Message = {
-          id: Date.now().toString(),
-          type: 'user',
-          content: transcriptionData.text,
-          timestamp: new Date()
-        };
+          console.log('Transcription successful:', transcriptionData.text);
 
-        setMessages(prev => [...prev, userMessage]);
-        await getAIResponse(transcriptionData.text);
+          const userMessage: Message = {
+            id: Date.now().toString(),
+            type: 'user',
+            content: transcriptionData.text,
+            timestamp: new Date()
+          };
+
+          setMessages(prev => [...prev, userMessage]);
+          await getAIResponse(transcriptionData.text);
+        } catch (readerError) {
+          console.error('Error in audio processing reader:', readerError);
+          throw readerError;
+        }
+      };
+      
+      reader.onerror = () => {
+        throw new Error('Failed to read audio file');
       };
     } catch (error) {
       console.error('Error processing audio:', error);
       toast({
         title: "Eroare",
-        description: "Nu am putut procesa audio-ul",
+        description: `Nu am putut procesa audio-ul: ${error.message}`,
         variant: "destructive",
       });
     } finally {
@@ -225,22 +259,43 @@ export default function AgentTestingPanel({
   };
 
   const getAIResponse = async (userText: string) => {
+    console.log('Getting AI response for conversation:', conversationId);
     setIsProcessing(true);
+    
     try {
+      if (!conversationId) {
+        throw new Error('No conversation ID available');
+      }
+
+      console.log('Calling voice-chat with:', {
+        conversationId,
+        message: userText,
+        specialtyFocus: agent.medical_specialty
+      });
+
       const { data: responseData, error: responseError } = await supabase.functions.invoke(
         'openai-voice-chat',
         {
           body: {
             conversationId: conversationId,
             message: userText,
-            specialtyFocus: agent.medical_specialty,
+            specialtyFocus: agent.medical_specialty || 'general',
             useVoice: true,
-            voice: 'alloy'
+            voice: selectedVoice || 'alloy'
           }
         }
       );
 
-      if (responseError) throw responseError;
+      if (responseError) {
+        console.error('Voice chat error:', responseError);
+        throw new Error(responseError.message || 'Voice chat function failed');
+      }
+
+      if (!responseData?.response) {
+        throw new Error('No response received from AI');
+      }
+
+      console.log('AI response received:', responseData.response);
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -251,14 +306,44 @@ export default function AgentTestingPanel({
 
       setMessages(prev => [...prev, assistantMessage]);
 
-      // Convert response to speech
-      await playAIResponse(responseData.response);
+      // Convert response to speech if audio content is available
+      if (responseData.audioContent) {
+        console.log('Playing audio response from voice-chat function');
+        try {
+          const audioBlob = new Blob([
+            Uint8Array.from(atob(responseData.audioContent), c => c.charCodeAt(0))
+          ], { type: 'audio/mp3' });
+          
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+          currentAudioRef.current = audio;
+
+          audio.onplay = () => setIsPlaying(true);
+          audio.onended = () => {
+            setIsPlaying(false);
+            URL.revokeObjectURL(audioUrl);
+          };
+          audio.onerror = () => {
+            setIsPlaying(false);
+            URL.revokeObjectURL(audioUrl);
+          };
+
+          await audio.play();
+        } catch (audioError) {
+          console.error('Error playing audio from response:', audioError);
+          // Fallback to text-to-speech
+          await playAIResponse(responseData.response);
+        }
+      } else {
+        // Convert response to speech using separate TTS
+        await playAIResponse(responseData.response);
+      }
 
     } catch (error) {
       console.error('Error getting AI response:', error);
       toast({
         title: "Eroare",
-        description: error.message || "Nu am putut obține răspunsul AI",
+        description: `Nu am putut obține răspunsul AI: ${error.message}`,
         variant: "destructive",
       });
     } finally {

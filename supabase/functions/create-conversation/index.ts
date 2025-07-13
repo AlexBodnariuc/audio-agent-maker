@@ -6,7 +6,7 @@ import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 const requestSchema = z.object({
   specialtyFocus: z.string().default('general'),
   quizSessionId: z.string().uuid().optional(),
-  sessionType: z.enum(['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance']).default('enhanced_voice_learning'),
+  sessionType: z.enum(['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing']).default('enhanced_voice_learning'),
 });
 
 const corsHeaders = {
@@ -47,13 +47,16 @@ serve(async (req) => {
       throw new Error('No active voice personality found');
     }
 
-    // Create conversation with relaxed user constraints
+    // Create conversation with proper data structure
     const conversationData = {
       voice_personality_id: personality.id,
       voice_session_type: sessionType || 'enhanced_voice_learning',
       specialty_focus: specialtyFocus || 'general',
-      quiz_session_id: quizSessionId || null,
+      quiz_session_id: quizSessionId || null, // Explicitly allow null
       user_id: null, // Allow null user_id for voice sessions
+      email_session_id: null, // Allow null for voice sessions
+      status: 'active',
+      title: `Voice Session - ${specialtyFocus || 'General'}`,
       learning_context: {
         sessionType: sessionType || 'enhanced_voice_learning',
         startTime: new Date().toISOString(),

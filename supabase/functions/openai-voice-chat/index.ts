@@ -96,9 +96,9 @@ serve(async (req) => {
       message: sanitizedMessage, 
       specialtyFocus: validatedSpecialty, 
       useVoice,
-      voice: validatedVoice,
-      ttsOnly,
-      text
+        voice: validatedVoice,
+        ttsOnly,
+        text
     } = validationResult.data;
 
     // Get conversation context with security validation and timeout
@@ -253,7 +253,7 @@ serve(async (req) => {
       metadata: {
         hasAudio: !!audioContent,
         messageLength: aiResponse.length,
-        voice: useVoice ? voice : null
+        voice: useVoice ? validatedVoice : null
       }
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
