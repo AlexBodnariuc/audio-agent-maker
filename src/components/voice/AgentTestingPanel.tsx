@@ -179,11 +179,21 @@ export default function AgentTestingPanel({
 
           if (transcriptionError) {
             console.error('Transcription error:', transcriptionError);
-            throw new Error(transcriptionError.message || 'Speech-to-text failed');
+            const errorMsg = transcriptionError.message || 'Speech-to-text failed';
+            if (errorMsg.includes('API key')) {
+              throw new Error('Cheile API nu sunt configurate corect. Verifică configurația.');
+            }
+            throw new Error(errorMsg);
+          }
+
+          if (!transcriptionData?.success) {
+            console.error('Transcription failed:', transcriptionData);
+            throw new Error(transcriptionData?.error || 'Speech-to-text service failed');
           }
 
           if (!transcriptionData?.text) {
-            throw new Error('No transcription text received');
+            console.error('No transcription text:', transcriptionData);
+            throw new Error('Nu s-a primit text de la serviciul de recunoaștere vocală');
           }
 
           console.log('Transcription successful:', transcriptionData.text);
@@ -363,12 +373,33 @@ export default function AgentTestingPanel({
         requestBody = { text, voice: selectedVoice, format: 'mp3' };
       }
 
+      console.log(`Calling ${functionName} with:`, requestBody);
+
       const { data: audioData, error: audioError } = await supabase.functions.invoke(
         functionName,
         { body: requestBody }
       );
 
-      if (audioError) throw audioError;
+      if (audioError) {
+        console.error('Audio generation error:', audioError);
+        const errorMsg = audioError.message || 'Audio generation failed';
+        if (errorMsg.includes('API key')) {
+          throw new Error('Cheile API nu sunt configurate corect. Verifică configurația.');
+        }
+        throw audioError;
+      }
+
+      if (!audioData?.success) {
+        console.error('Audio generation failed:', audioData);
+        throw new Error(audioData?.error || 'Text-to-speech service failed');
+      }
+
+      if (!audioData?.audioContent) {
+        console.error('No audio content received:', audioData);
+        throw new Error('Nu s-a primit conținut audio de la serviciu');
+      }
+
+      console.log('Audio generated successfully, playing...');
 
       // Create audio element and play
       const audioBlob = new Blob([
@@ -384,17 +415,19 @@ export default function AgentTestingPanel({
         setIsPlaying(false);
         URL.revokeObjectURL(audioUrl);
       };
-      audio.onerror = () => {
+      audio.onerror = (e) => {
+        console.error('Audio playback error:', e);
         setIsPlaying(false);
         URL.revokeObjectURL(audioUrl);
+        throw new Error('Eroare la redarea audio-ului');
       };
 
       await audio.play();
     } catch (error) {
       console.error('Error playing audio:', error);
       toast({
-        title: "Eroare",
-        description: "Nu am putut reda audio-ul",
+        title: "Eroare Audio",
+        description: error.message || "Nu am putut reda audio-ul",
         variant: "destructive",
       });
     }

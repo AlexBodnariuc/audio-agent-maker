@@ -20,7 +20,14 @@ serve(async (req) => {
 
     const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY')
     if (!ELEVENLABS_API_KEY) {
-      throw new Error('ElevenLabs API key not configured')
+      console.error('Missing ELEVENLABS_API_KEY');
+      return new Response(JSON.stringify({
+        error: 'ElevenLabs API key not configured',
+        success: false
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     console.log(`Generating speech with ElevenLabs for voice: ${voice_id}`)
@@ -55,7 +62,14 @@ serve(async (req) => {
     )
 
     return new Response(
-      JSON.stringify({ audioContent: base64Audio }),
+      JSON.stringify({ 
+        success: true,
+        audioContent: base64Audio,
+        metadata: {
+          voice_id: voice_id,
+          model: 'eleven_multilingual_v2'
+        }
+      }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       },
@@ -63,7 +77,11 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error in elevenlabs-text-to-speech function:', error)
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ 
+        error: error.message,
+        success: false,
+        timestamp: new Date().toISOString()
+      }),
       {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

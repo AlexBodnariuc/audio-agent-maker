@@ -53,7 +53,14 @@ serve(async (req) => {
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
 
     if (!openaiApiKey) {
-      throw new Error('Missing OPENAI_API_KEY environment variable');
+      console.error('Missing OPENAI_API_KEY');
+      return new Response(JSON.stringify({
+        error: 'OpenAI API key not configured',
+        success: false
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // Parse and validate request body with Zod

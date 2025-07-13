@@ -49,8 +49,26 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-    if (!openaiApiKey || !supabaseUrl || !supabaseServiceRoleKey) {
-      throw new Error('Missing required environment variables');
+    if (!openaiApiKey) {
+      console.error('Missing OPENAI_API_KEY');
+      return new Response(JSON.stringify({
+        error: 'OpenAI API key not configured',
+        success: false
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!supabaseUrl || !supabaseServiceRoleKey) {
+      console.error('Missing Supabase configuration');
+      return new Response(JSON.stringify({
+        error: 'Supabase configuration missing',
+        success: false
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
@@ -142,11 +160,23 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in speech-to-text function:', error);
+    
+    // Determine appropriate status code and error message
+    let statusCode = 500;
+    let errorMessage = error.message || 'Unknown error occurred';
+    
+    if (errorMessage.includes('Validation error') || errorMessage.includes('invalid')) {
+      statusCode = 400;
+    } else if (errorMessage.includes('OpenAI')) {
+      statusCode = 502;
+    }
+    
     return new Response(JSON.stringify({
-      error: error.message,
-      success: false
+      error: errorMessage,
+      success: false,
+      timestamp: new Date().toISOString()
     }), {
-      status: 500,
+      status: statusCode,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
