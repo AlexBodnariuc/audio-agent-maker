@@ -55,8 +55,9 @@ serve(async (req) => {
     if (!openaiApiKey) {
       console.error('Missing OPENAI_API_KEY');
       return new Response(JSON.stringify({
-        error: 'OpenAI API key not configured',
-        success: false
+        error: 'OpenAI API key not configured. Please check your environment variables.',
+        success: false,
+        code: 'MISSING_API_KEY'
       }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -112,6 +113,7 @@ serve(async (req) => {
         sanitized: parsedBody.text !== sanitizedText
       }
     }), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
@@ -120,15 +122,18 @@ serve(async (req) => {
     
     // Return structured error response
     const errorResponse = {
-      error: error.message,
+      error: error.message || 'Unknown error occurred',
       success: false,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      code: error.code || 'UNKNOWN_ERROR'
     };
 
     // Determine appropriate status code
     let statusCode = 500;
-    if (error.message.includes('required') || error.message.includes('Invalid')) {
+    if (error.message.includes('required') || error.message.includes('Invalid') || error.message.includes('gol')) {
       statusCode = 400;
+    } else if (error.message.includes('API key')) {
+      statusCode = 500;
     }
 
     return new Response(JSON.stringify(errorResponse), {

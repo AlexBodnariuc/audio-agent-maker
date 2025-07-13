@@ -111,25 +111,22 @@ export default function EnhancedVoiceQuizAssistant({
     if (!selectedAgent) return;
 
     try {
-      const { data, error } = await supabase
-        .from('conversations')
-        .insert({
-          voice_personality_id: selectedAgent.id,
-          voice_session_type: 'quiz_assistance',
-          specialty_focus: selectedAgent.medical_specialty,
-          quiz_session_id: quizSessionId,
-          status: 'active',
-          learning_context: {
-            current_question: question,
-            subject: subject,
-            quiz_session_id: quizSessionId
-          }
-        })
-        .select()
-        .single();
+      // Use the create-conversation edge function for better error handling
+      const { data, error } = await supabase.functions.invoke('create-conversation', {
+        body: {
+          specialtyFocus: selectedAgent.medical_specialty,
+          quizSessionId: quizSessionId && quizSessionId !== "demo-session" ? quizSessionId : null,
+          sessionType: 'quiz_assistance'
+        }
+      });
 
       if (error) throw error;
-      setConversationId(data.id);
+      
+      if (data?.conversationId) {
+        setConversationId(data.conversationId);
+      } else {
+        throw new Error("No conversation ID returned");
+      }
     } catch (error) {
       console.error('Error creating conversation:', error);
       toast({
@@ -303,51 +300,30 @@ export default function EnhancedVoiceQuizAssistant({
 
   const playAIResponse = async (text: string) => {
     try {
-      // Use ElevenLabs for better Romanian pronunciation
+      // Always use OpenAI TTS with better error handling
       const { data: audioData, error: audioError } = await supabase.functions.invoke(
-        'elevenlabs-text-to-speech',
+        'openai-text-to-speech',
         {
           body: {
             text: text,
-            voice_id: 'Xb7hH8MSUJpSbSDYk0k2' // Alice - good for Romanian
+            voice: 'nova', // Better for Romanian than alloy
+            format: 'mp3'
           }
         }
       );
 
       if (audioError) {
-        // Fallback to OpenAI TTS if ElevenLabs fails
-        console.warn('ElevenLabs failed, falling back to OpenAI:', audioError);
-        const { data: fallbackData, error: fallbackError } = await supabase.functions.invoke(
-          'openai-text-to-speech',
-          {
-            body: {
-              text: text,
-              voice: 'nova' // Better for Romanian than alloy
-            }
-          }
-        );
-        
-        if (fallbackError) throw fallbackError;
-        
-        const audioBlob = new Blob([
-          Uint8Array.from(atob(fallbackData.audioContent), c => c.charCodeAt(0))
-        ], { type: 'audio/mp3' });
-        
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        currentAudioRef.current = audio;
-
-        audio.onended = () => {
-          URL.revokeObjectURL(audioUrl);
-        };
-
-        await audio.play();
-        return;
+        console.error('TTS Error:', audioError);
+        throw new Error(audioError.message || 'Failed to generate speech');
       }
 
+      if (!audioData?.audioContent) {
+        throw new Error('No audio content received');
+      }
+      
       const audioBlob = new Blob([
         Uint8Array.from(atob(audioData.audioContent), c => c.charCodeAt(0))
-      ], { type: 'audio/mpeg' });
+      ], { type: 'audio/mp3' });
       
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
@@ -357,12 +333,17 @@ export default function EnhancedVoiceQuizAssistant({
         URL.revokeObjectURL(audioUrl);
       };
 
+      audio.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        URL.revokeObjectURL(audioUrl);
+      };
+
       await audio.play();
     } catch (error) {
       console.error('Error playing audio:', error);
       toast({
-        title: "Eroare Audio",
-        description: "Nu am putut reda răspunsul audio.",
+        title: "Eroare Audio", 
+        description: `Nu am putut reda răspunsul audio: ${error.message}`,
         variant: "destructive",
       });
     }
