@@ -2,13 +2,15 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Bot, Plus, Users, Sparkles } from "lucide-react";
+import { ArrowLeft, Bot, Plus, Users, Sparkles, RefreshCw, AlertCircle, Wifi } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import VoiceAgentCard from "@/components/voice/VoiceAgentCard";
 import CreateAgentDialog from "@/components/voice/CreateAgentDialog";
 import AgentTestingPanel from "@/components/voice/AgentTestingPanel";
+import { ROMANIAN_TRANSLATIONS } from "@/components/medmentor/RomanianUI";
 
 interface VoicePersonality {
   id: string;
@@ -25,7 +27,10 @@ export default function VoiceAssistants() {
   const [personalities, setPersonalities] = useState<VoicePersonality[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<VoicePersonality | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [operationInProgress, setOperationInProgress] = useState<string | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -33,25 +38,56 @@ export default function VoiceAssistants() {
     fetchVoicePersonalities();
   }, []);
 
-  const fetchVoicePersonalities = async () => {
+  const fetchVoicePersonalities = async (showRetryToast = false) => {
     try {
+      setError(null);
+      if (showRetryToast) {
+        setRetrying(true);
+      }
+      
       const { data, error } = await supabase
         .from('voice_personalities')
         .select('*')
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        // Handle specific database errors
+        if (error.code === 'PGRST116') {
+          throw new Error('Tabelul pentru asistenți vocali nu există');
+        } else if (error.message.includes('connection')) {
+          throw new Error('Probleme de conexiune cu baza de date');
+        }
+        throw new Error(`Eroare bază de date: ${error.message}`);
+      }
+      
       setPersonalities(data || []);
+      
+      if (showRetryToast && data) {
+        toast({
+          title: ROMANIAN_TRANSLATIONS.STATUS.success,
+          description: `Încărcat ${data.length} asistenți vocali`,
+        });
+      }
+      
     } catch (error) {
       console.error('Error fetching voice personalities:', error);
-      toast({
-        title: "Eroare",
-        description: "Nu am putut încărca asistenții vocali",
-        variant: "destructive",
-      });
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Nu am putut încărca asistenții vocali';
+      
+      setError(errorMessage);
+      
+      if (!showRetryToast) {
+        toast({
+          title: ROMANIAN_TRANSLATIONS.STATUS.error,
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
+      setRetrying(false);
     }
   };
 
@@ -70,63 +106,109 @@ export default function VoiceAssistants() {
 
   const handleAgentUpdate = async (agentId: string, updates: Partial<VoicePersonality>) => {
     try {
+      setOperationInProgress(`update-${agentId}`);
+      
       const { error } = await supabase
         .from('voice_personalities')
-        .update(updates)
+        .update({ ...updates, updated_at: new Date().toISOString() })
         .eq('id', agentId);
 
-      if (error) throw error;
+      if (error) {
+        if (error.code === '23505') {
+          throw new Error('Un asistent cu aceste date există deja');
+        }
+        throw new Error(`Eroare la actualizare: ${error.message}`);
+      }
 
       setPersonalities(prev => 
-        prev.map(p => p.id === agentId ? { ...p, ...updates } : p)
+        prev.map(p => p.id === agentId ? { ...p, ...updates, updated_at: new Date().toISOString() } : p)
       );
 
+      // Update selected agent if it's the one being updated
+      if (selectedAgent?.id === agentId) {
+        setSelectedAgent(prev => prev ? { ...prev, ...updates, updated_at: new Date().toISOString() } : null);
+      }
+
       toast({
-        title: "Actualizat!",
+        title: ROMANIAN_TRANSLATIONS.STATUS.success,
         description: "Asistentul vocal a fost actualizat cu succes",
       });
     } catch (error) {
       console.error('Error updating agent:', error);
+      
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Nu am putut actualiza asistentul vocal';
+        
       toast({
-        title: "Eroare",
-        description: "Nu am putut actualiza asistentul vocal",
+        title: ROMANIAN_TRANSLATIONS.STATUS.error,
+        description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setOperationInProgress(null);
     }
   };
 
   const handleAgentDelete = async (agentId: string) => {
     try {
+      setOperationInProgress(`delete-${agentId}`);
+      
+      const agentToDelete = personalities.find(p => p.id === agentId);
+      
       const { error } = await supabase
         .from('voice_personalities')
-        .update({ is_active: false })
+        .update({ 
+          is_active: false, 
+          updated_at: new Date().toISOString()
+        })
         .eq('id', agentId);
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(`Eroare la ștergere: ${error.message}`);
+      }
 
       setPersonalities(prev => prev.filter(p => p.id !== agentId));
+      
       if (selectedAgent?.id === agentId) {
         setSelectedAgent(null);
       }
 
       toast({
-        title: "Șters!",
-        description: "Asistentul vocal a fost șters cu succes",
+        title: ROMANIAN_TRANSLATIONS.STATUS.success,
+        description: `Asistentul "${agentToDelete?.name || 'Unknown'}" a fost șters cu succes`,
       });
     } catch (error) {
       console.error('Error deleting agent:', error);
+      
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Nu am putut șterge asistentul vocal';
+        
       toast({
-        title: "Eroare",
-        description: "Nu am putut șterge asistentul vocal",
+        title: ROMANIAN_TRANSLATIONS.STATUS.error,
+        description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setOperationInProgress(null);
     }
+  };
+
+  const handleRetry = () => {
+    setLoading(true);
+    fetchVoicePersonalities(true);
   };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-hero flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-medical-blue"></div>
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-medical-blue mx-auto"></div>
+          <p className="text-muted-foreground">
+            {retrying ? 'Reîncărcare...' : ROMANIAN_TRANSLATIONS.STATUS.loading}
+          </p>
+        </div>
       </div>
     );
   }
@@ -145,17 +227,46 @@ export default function VoiceAssistants() {
             Înapoi la Pagina Principală
           </Button>
           
+          {error && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="flex items-center justify-between">
+                <span>{error}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetry}
+                  disabled={retrying}
+                  className="ml-4"
+                >
+                  {retrying ? (
+                    <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <Wifi className="h-3 w-3 mr-1" />
+                  )}
+                  Reîncearcă
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+          
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-foreground mb-2">
-                Asistenți Vocali AI
+                Asistenți Vocali AI MedMentor
               </h1>
               <p className="text-muted-foreground">
-                Gestionează și testează asistenții vocali pentru MedMentor
+                Gestionează și testează asistenții vocali pentru pregătirea la UMF
               </p>
+              {personalities.length > 0 && (
+                <p className="text-sm text-medical-blue mt-1">
+                  {personalities.length} asistenți activi
+                </p>
+              )}
             </div>
             <Button 
               onClick={() => setShowCreateDialog(true)}
+              disabled={operationInProgress !== null}
               className="bg-medical-blue hover:bg-medical-blue/90"
             >
               <Plus className="h-4 w-4 mr-2" />

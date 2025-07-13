@@ -88,10 +88,22 @@ export default function VoiceAgentCard({
     setShowEditDialog(true);
   };
 
-  const handleDelete = (e: React.MouseEvent) => {
+  const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm(`Ești sigur că vrei să ștergi asistentul "${agent.name}"?`)) {
-      onDelete(agent.id);
+    
+    // Enhanced confirmation with Romanian text
+    const confirmMessage = `Ești sigur că vrei să ștergi asistentul "${agent.name}"?\n\nAceastă acțiune nu poate fi anulată.`;
+    
+    if (confirm(confirmMessage)) {
+      try {
+        setIsLoading(true);
+        await onDelete(agent.id);
+      } catch (error) {
+        console.error('Error deleting agent:', error);
+        // Error will be handled by parent component
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -141,21 +153,27 @@ export default function VoiceAgentCard({
               >
                 <Edit className="h-4 w-4" />
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleDelete}
-                className="h-8 w-8 p-0 hover:text-destructive"
-              >
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleDelete}
+              disabled={isLoading}
+              className="h-8 w-8 p-0 hover:text-destructive disabled:opacity-50"
+              title="Șterge asistentul"
+            >
+              {isLoading ? (
+                <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
                 <Trash2 className="h-4 w-4" />
-              </Button>
+              )}
+            </Button>
             </div>
           </div>
         </CardHeader>
         
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground line-clamp-3">
-            {agent.description}
+            {agent.description || 'Fără descriere disponibilă'}
           </p>
           
           <div className="flex items-center justify-between text-xs text-muted-foreground">

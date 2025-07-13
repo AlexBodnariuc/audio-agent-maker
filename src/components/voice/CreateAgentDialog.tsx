@@ -69,37 +69,80 @@ export default function CreateAgentDialog({ open, onOpenChange, onAgentCreated }
   const [isCreating, setIsCreating] = useState(false);
   const { toast } = useToast();
 
+  const validateForm = () => {
+    const errors: string[] = [];
+    
+    if (!formData.name.trim()) errors.push("Numele asistentului este obligatoriu");
+    if (formData.name.trim().length < 3) errors.push("Numele trebuie să aibă minim 3 caractere");
+    if (formData.name.trim().length > 100) errors.push("Numele trebuie să aibă maxim 100 caractere");
+    
+    if (!formData.description.trim()) errors.push("Descrierea este obligatorie");
+    if (formData.description.trim().length < 10) errors.push("Descrierea trebuie să aibă minim 10 caractere");
+    if (formData.description.trim().length > 500) errors.push("Descrierea trebuie să aibă maxim 500 caractere");
+    
+    if (!formData.medical_specialty) errors.push("Specialitatea este obligatorie");
+    
+    if (formData.instructions && formData.instructions.length > 1000) {
+      errors.push("Instrucțiunile trebuie să aibă maxim 1000 caractere");
+    }
+    
+    return errors;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.description || !formData.medical_specialty) {
+    
+    // Enhanced validation
+    const validationErrors = validateForm();
+    if (validationErrors.length > 0) {
       toast({
-        title: "Câmpuri incomplete",
-        description: "Te rog completează toate câmpurile obligatorii",
+        title: "Date invalide",
+        description: validationErrors[0],
         variant: "destructive",
       });
       return;
     }
 
     setIsCreating(true);
+    
     try {
-      // Generate a unique agent_id
-      const agentId = `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Generate a unique agent_id with better entropy
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 12);
+      const agentId = `medmentor_${timestamp}_${randomStr}`;
+
+      // Sanitize input data
+      const sanitizedData = {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        medical_specialty: formData.medical_specialty,
+        agent_id: agentId,
+        is_active: true
+      };
 
       const { data, error } = await supabase
         .from('voice_personalities')
-        .insert({
-          name: formData.name,
-          description: formData.description,
-          medical_specialty: formData.medical_specialty,
-          agent_id: agentId,
-          is_active: true
-        })
+        .insert(sanitizedData)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // Handle specific Supabase errors
+        if (error.code === '23505') {
+          throw new Error('Un asistent cu acest nume există deja');
+        }
+        throw new Error(`Eroare bază de date: ${error.message}`);
+      }
+
+      toast({
+        title: "Succes!",
+        description: `Asistentul "${data.name}" a fost creat cu succes`,
+        variant: "default",
+      });
 
       onAgentCreated(data);
+      
+      // Reset form
       setFormData({
         name: "",
         description: "",
@@ -107,11 +150,19 @@ export default function CreateAgentDialog({ open, onOpenChange, onAgentCreated }
         instructions: ""
       });
       
+      // Close dialog
+      onOpenChange(false);
+      
     } catch (error) {
       console.error('Error creating agent:', error);
+      
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Nu am putut crea asistentul vocal. Te rog încearcă din nou.';
+        
       toast({
-        title: "Eroare",
-        description: "Nu am putut crea asistentul vocal",
+        title: "Eroare la creare",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -171,8 +222,15 @@ export default function CreateAgentDialog({ open, onOpenChange, onAgentCreated }
                 placeholder="ex: Dr. Ana - Specialist Biologie"
                 value={formData.name}
                 onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                maxLength={100}
                 required
+                className={formData.name.length > 90 ? 'border-medical-yellow' : ''}
               />
+              {formData.name.length > 90 && (
+                <p className="text-xs text-medical-yellow">
+                  {100 - formData.name.length} caractere rămase
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -202,9 +260,17 @@ export default function CreateAgentDialog({ open, onOpenChange, onAgentCreated }
               placeholder="Descrie personalitatea și expertiza asistentului..."
               value={formData.description}
               onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+              maxLength={500}
               required
               rows={3}
+              className={formData.description.length > 450 ? 'border-medical-yellow' : ''}
             />
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Minim 10 caractere</span>
+              <span className={formData.description.length > 450 ? 'text-medical-yellow' : 'text-muted-foreground'}>
+                {formData.description.length}/500
+              </span>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -214,11 +280,18 @@ export default function CreateAgentDialog({ open, onOpenChange, onAgentCreated }
               placeholder="Instrucțiuni specifice pentru comportamentul asistentului..."
               value={formData.instructions}
               onChange={(e) => setFormData(prev => ({ ...prev, instructions: e.target.value }))}
+              maxLength={1000}
               rows={4}
+              className={formData.instructions.length > 900 ? 'border-medical-yellow' : ''}
             />
-            <p className="text-xs text-muted-foreground">
-              Aceste instrucțiuni vor fi folosite pentru a personaliza răspunsurile asistentului
-            </p>
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">
+                Aceste instrucțiuni vor personaliza răspunsurile asistentului
+              </span>
+              <span className={formData.instructions.length > 900 ? 'text-medical-yellow' : 'text-muted-foreground'}>
+                {formData.instructions.length}/1000
+              </span>
+            </div>
           </div>
 
           <div className="flex gap-3 justify-end">
