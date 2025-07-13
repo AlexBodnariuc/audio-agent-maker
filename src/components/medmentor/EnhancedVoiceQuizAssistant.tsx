@@ -303,21 +303,51 @@ export default function EnhancedVoiceQuizAssistant({
 
   const playAIResponse = async (text: string) => {
     try {
+      // Use ElevenLabs for better Romanian pronunciation
       const { data: audioData, error: audioError } = await supabase.functions.invoke(
-        'openai-voice-chat',
+        'elevenlabs-text-to-speech',
         {
           body: {
             text: text,
-            voice: 'alloy'
+            voice_id: 'Xb7hH8MSUJpSbSDYk0k2' // Alice - good for Romanian
           }
         }
       );
 
-      if (audioError) throw audioError;
+      if (audioError) {
+        // Fallback to OpenAI TTS if ElevenLabs fails
+        console.warn('ElevenLabs failed, falling back to OpenAI:', audioError);
+        const { data: fallbackData, error: fallbackError } = await supabase.functions.invoke(
+          'openai-text-to-speech',
+          {
+            body: {
+              text: text,
+              voice: 'nova' // Better for Romanian than alloy
+            }
+          }
+        );
+        
+        if (fallbackError) throw fallbackError;
+        
+        const audioBlob = new Blob([
+          Uint8Array.from(atob(fallbackData.audioContent), c => c.charCodeAt(0))
+        ], { type: 'audio/mp3' });
+        
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        currentAudioRef.current = audio;
+
+        audio.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+        };
+
+        await audio.play();
+        return;
+      }
 
       const audioBlob = new Blob([
         Uint8Array.from(atob(audioData.audioContent), c => c.charCodeAt(0))
-      ], { type: 'audio/mp3' });
+      ], { type: 'audio/mpeg' });
       
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
@@ -330,6 +360,11 @@ export default function EnhancedVoiceQuizAssistant({
       await audio.play();
     } catch (error) {
       console.error('Error playing audio:', error);
+      toast({
+        title: "Eroare Audio",
+        description: "Nu am putut reda răspunsul audio.",
+        variant: "destructive",
+      });
     }
   };
 
