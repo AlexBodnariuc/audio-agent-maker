@@ -170,11 +170,7 @@ export default function Index() {
               Înapoi la Pagina Principală
             </Button>
           </div>
-          <StudentDashboard 
-            studentName="Maria" 
-            stats={sampleStudentStats}
-            onStartQuiz={handleStartQuiz}
-          />
+          <StudentDashboard />
         </div>
       </div>
     );
