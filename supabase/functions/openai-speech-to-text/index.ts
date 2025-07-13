@@ -85,7 +85,7 @@ serve(async (req) => {
       .insert({
         conversation_id: conversationId,
         content: transcriptionText,
-        message_type: 'user_voice',
+        message_type: 'user',
         timestamp: new Date().toISOString(),
         confidence_score: analysis.confidence,
         language_detected: language,
