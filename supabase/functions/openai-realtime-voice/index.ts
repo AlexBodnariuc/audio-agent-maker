@@ -42,9 +42,12 @@ IMPORTANTE:
 
 Începe fiecare răspuns cu un salut prietenos și încurajează întrebări!`;
 
-// Rate limiting for security
-const RATE_LIMIT_MAX_SESSIONS = 5; // Max 5 realtime sessions per minute per user
+// Rate limiting for security - temporarily relaxed for debugging
+const RATE_LIMIT_MAX_SESSIONS = 15; // Increased to 15 sessions per minute
 const RATE_LIMIT_WINDOW = 60000; // 1 minute in milliseconds
+const SESSION_TIMEOUT = 60000; // 60 seconds before considering session stale
+const HEARTBEAT_INTERVAL = 20000; // 20 seconds between heartbeats
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -129,20 +132,39 @@ serve(async (req) => {
     let messageQueue: string[] = []; // Queue messages until session is ready
     let lastHeartbeat = Date.now();
     
-    // Heartbeat to detect connection issues
+    // Enhanced heartbeat monitoring with graceful recovery
     const heartbeatInterval = setInterval(() => {
       const now = Date.now();
-      if (now - lastHeartbeat > 30000) { // 30 seconds timeout
-        console.warn('Heartbeat timeout, attempting reconnection');
-        if (sessionState !== 'error') {
+      if (now - lastHeartbeat > 60000) { // 60 seconds timeout
+        console.warn(`Heartbeat timeout detected: ${now - lastHeartbeat}ms since last heartbeat`);
+        
+        // Send heartbeat before declaring session dead
+        if (openAISocket && openAISocket.readyState === WebSocket.OPEN) {
+          try {
+            openAISocket.send(JSON.stringify({ type: 'ping' }));
+            console.log('Sent heartbeat ping to OpenAI');
+          } catch (error) {
+            console.error('Failed to send heartbeat:', error);
+            sessionState = 'error';
+            socket.send(JSON.stringify({
+              type: 'session_error',
+              message: 'Conexiunea s-a întrerupt. Se reîncearcă...',
+              canRetry: true,
+              reconnectSuggested: true
+            }));
+          }
+        } else {
+          console.warn('OpenAI WebSocket not available for heartbeat');
           sessionState = 'error';
           socket.send(JSON.stringify({
             type: 'session_error',
-            message: 'Conexiunea s-a întrerupt. Se reîncearc&acaron;...'
+            message: 'Conexiunea OpenAI s-a întrerupt. Se reîncearcă...',
+            canRetry: true,
+            reconnectSuggested: true
           }));
         }
       }
-    }, 10000);
+    }, 20000); // Check every 20 seconds
 
     const processMessageQueue = () => {
       if (sessionState === 'ready' && openAISocket && openAISocket.readyState === WebSocket.OPEN) {
@@ -158,25 +180,48 @@ serve(async (req) => {
 
     socket.onopen = async () => {
       try {
-        console.log('Client WebSocket connected');
+        console.log(`Client WebSocket connected for conversation ${validConversationId}`);
         sessionState = 'connecting';
         lastHeartbeat = Date.now();
         
-        // Connect to OpenAI Realtime API
+        // Enhanced connection to OpenAI with retry logic
         const openAIUrl = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
+        console.log(`Connecting to OpenAI Realtime API: ${openAIUrl}`);
+        
         openAISocket = new WebSocket(openAIUrl, [], {
           headers: {
             'Authorization': `Bearer ${openaiApiKey}`,
             'OpenAI-Beta': 'realtime=v1'
           }
         });
+        
+        // Add connection timeout
+        const connectionTimeout = setTimeout(() => {
+          if (sessionState === 'connecting') {
+            console.error('OpenAI connection timeout');
+            sessionState = 'error';
+            socket.send(JSON.stringify({
+              type: 'connection_timeout',
+              message: 'Timeout la conectarea cu OpenAI',
+              canRetry: true
+            }));
+            if (openAISocket) {
+              openAISocket.close();
+            }
+          }
+        }, 15000); // 15 second timeout
 
         openAISocket.onopen = () => {
-          console.log('Connected to OpenAI Realtime API');
+          clearTimeout(connectionTimeout);
+          console.log('Successfully connected to OpenAI Realtime API');
           sessionState = 'configuring';
+          lastHeartbeat = Date.now();
+          
           socket.send(JSON.stringify({
             type: 'connection_established',
-            message: 'Conectat la OpenAI Realtime API'
+            message: 'Conectat la OpenAI Realtime API',
+            timestamp: Date.now(),
+            sessionState: 'configuring'
           }));
         };
 
@@ -230,22 +275,52 @@ serve(async (req) => {
               processMessageQueue();
             }
 
-            // Handle error recovery
+            // Enhanced error recovery with detailed logging
             if (data.type === 'error') {
-              console.error('OpenAI error:', data);
+              console.error('OpenAI error received:', {
+                error: data.error,
+                message: data.message,
+                sessionState: sessionState,
+                timestamp: new Date().toISOString()
+              });
+              
+              const errorMessage = data.error?.message || data.message || 'Eroare necunoscută de la OpenAI';
               sessionState = 'error';
               
-              // Attempt to recover after a delay
-              setTimeout(() => {
-                if (sessionState === 'error' && openAISocket) {
-                  console.log('Attempting session recovery...');
-                  sessionState = 'configuring';
-                  socket.send(JSON.stringify({
-                    type: 'session_recovery',
-                    message: 'Se reîncearc&acaron; conectarea...'
-                  }));
-                }
-              }, 2000);
+              socket.send(JSON.stringify({
+                type: 'openai_error',
+                message: errorMessage,
+                canRetry: true,
+                errorDetails: data.error,
+                timestamp: Date.now()
+              }));
+              
+              // Intelligent recovery based on error type
+              const shouldRecover = !errorMessage.includes('rate_limit') && 
+                                   !errorMessage.includes('quota') &&
+                                   !errorMessage.includes('authentication');
+              
+              if (shouldRecover) {
+                console.log('Attempting intelligent recovery from error...');
+                setTimeout(() => {
+                  if (sessionState === 'error' && openAISocket && openAISocket.readyState !== WebSocket.CLOSED) {
+                    console.log('Trying session recovery...');
+                    sessionState = 'configuring';
+                    socket.send(JSON.stringify({
+                      type: 'session_recovery',
+                      message: 'Se reîncearcă conectarea...',
+                      attempt: 1
+                    }));
+                  }
+                }, 3000);
+              } else {
+                console.log('Error not recoverable, manual intervention required');
+                socket.send(JSON.stringify({
+                  type: 'manual_intervention_required',
+                  message: 'Eroare care necesită intervenție manuală',
+                  errorType: 'non_recoverable'
+                }));
+              }
             }
 
             // Handle function calls or tool usage if needed
@@ -288,24 +363,53 @@ serve(async (req) => {
         };
 
         openAISocket.onerror = (error) => {
-          console.error('OpenAI WebSocket error:', error);
+          clearTimeout(connectionTimeout);
+          console.error('OpenAI WebSocket error:', {
+            error: error,
+            readyState: openAISocket?.readyState,
+            sessionState: sessionState,
+            timestamp: new Date().toISOString()
+          });
+          
           sessionState = 'error';
           socket.send(JSON.stringify({
             type: 'connection_error',
             message: 'Eroare de conexiune cu OpenAI',
-            canRetry: true
+            canRetry: true,
+            errorDetails: {
+              readyState: openAISocket?.readyState,
+              sessionState: sessionState
+            },
+            timestamp: Date.now()
           }));
         };
 
         openAISocket.onclose = (event) => {
-          console.log('OpenAI WebSocket closed', event.code, event.reason);
+          clearTimeout(connectionTimeout);
+          console.log('OpenAI WebSocket closed:', {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+            sessionState: sessionState,
+            timestamp: new Date().toISOString()
+          });
+          
           const wasReady = sessionState === 'ready';
+          const wasConnecting = sessionState === 'connecting' || sessionState === 'configuring';
           sessionState = 'disconnected';
+          
+          // Determine if this was an unexpected closure
+          const isUnexpectedClosure = !event.wasClean && (wasReady || wasConnecting);
           
           socket.send(JSON.stringify({
             type: 'session_ended',
             message: wasReady ? 'Sesiunea s-a închis' : 'Conexiunea s-a întrerupt',
-            wasEstablished: wasReady
+            wasEstablished: wasReady,
+            wasUnexpected: isUnexpectedClosure,
+            closeCode: event.code,
+            closeReason: event.reason,
+            canRetry: isUnexpectedClosure,
+            timestamp: Date.now()
           }));
         };
 
@@ -420,6 +524,8 @@ async function checkRateLimit(supabase: any, conversationId: string): Promise<{ 
     const now = new Date();
     const windowStart = new Date(now.getTime() - RATE_LIMIT_WINDOW);
     
+    console.log(`Checking rate limit for conversation ${conversationId}, window: ${windowStart.toISOString()}`);
+    
     const { data: rateLimits, error } = await supabase
       .from('rate_limits')
       .select('*')
@@ -429,12 +535,27 @@ async function checkRateLimit(supabase: any, conversationId: string): Promise<{ 
 
     if (error) {
       console.error('Rate limit check error:', error);
-      return { allowed: true }; // Allow on error
+      return { allowed: true }; // Allow on error for better user experience
     }
 
     const currentCount = rateLimits?.length || 0;
+    console.log(`Current rate limit count: ${currentCount}/${RATE_LIMIT_MAX_SESSIONS}`);
+    
     if (currentCount >= RATE_LIMIT_MAX_SESSIONS) {
+      console.warn(`Rate limit exceeded for conversation ${conversationId}: ${currentCount}/${RATE_LIMIT_MAX_SESSIONS}`);
       return { allowed: false };
+    }
+
+    // Clean up old rate limit entries to prevent table bloat
+    try {
+      await supabase
+        .from('rate_limits')
+        .delete()
+        .eq('identifier', conversationId)
+        .eq('action', 'realtime_voice')
+        .lt('window_start', new Date(now.getTime() - (RATE_LIMIT_WINDOW * 2)).toISOString());
+    } catch (cleanupError) {
+      console.warn('Rate limit cleanup failed:', cleanupError);
     }
 
     // Insert new rate limit entry
@@ -450,10 +571,11 @@ async function checkRateLimit(supabase: any, conversationId: string): Promise<{ 
         window_duration: '00:01:00'
       });
 
+    console.log(`Rate limit check passed for conversation ${conversationId}`);
     return { allowed: true };
   } catch (error) {
     console.error('Rate limiting error:', error);
-    return { allowed: true }; // Allow on error
+    return { allowed: true }; // Allow on error for better user experience
   }
 }
 

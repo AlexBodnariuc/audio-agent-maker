@@ -24,9 +24,14 @@ interface RealtimeMessage {
   message?: string;
   canRetry?: boolean;
   wasEstablished?: boolean;
+  wasUnexpected?: boolean;
   sessionState?: string;
   queueLength?: number;
   timestamp?: number;
+  errorDetails?: any;
+  reconnectSuggested?: boolean;
+  closeCode?: number;
+  closeReason?: string;
 }
 
 // Audio utilities for PCM16 processing
@@ -179,7 +184,7 @@ export default function VoiceTutorPanel({
   const recorderRef = useRef<AudioRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
-  const maxRetries = 3;
+  const maxRetries = 5; // Increased retry attempts
 
   // Initialize audio context
   useEffect(() => {
@@ -232,8 +237,9 @@ export default function VoiceTutorPanel({
         heartbeatRef.current = setInterval(() => {
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ type: 'ping' }));
+            console.log('Sent heartbeat ping to server');
           }
-        }, 30000); // Send ping every 30 seconds
+        }, 25000); // Send ping every 25 seconds
       };
 
       wsRef.current.onopen = () => {
@@ -291,10 +297,20 @@ export default function VoiceTutorPanel({
             case 'session_error':
             case 'connection_error':
             case 'initialization_error':
-              console.error('Session error:', data.message);
+            case 'connection_timeout':
+            case 'openai_error':
+              console.error('Session error:', data.message, data.errorDetails);
               setSessionState('error');
               setLastError(data.message || 'Eroare de sesiune');
-              setCanRetry(data.canRetry || false);
+              setCanRetry(data.canRetry !== false); // Default to true unless explicitly false
+              
+              // Auto-retry for recoverable errors
+              if (data.canRetry && retryCount < maxRetries && data.reconnectSuggested) {
+                console.log(`Auto-retrying connection in 3 seconds... (attempt ${retryCount + 1}/${maxRetries})`);
+                setTimeout(() => {
+                  retryConnection();
+                }, 3000);
+              }
               
               toast({
                 title: "Eroare Sesiune",
@@ -368,25 +384,45 @@ export default function VoiceTutorPanel({
               break;
 
             case 'session_ended':
-              console.log('Session ended:', data.message);
+              console.log('Session ended:', data.message, 'Details:', data);
               const wasEstablished = data.wasEstablished || false;
+              const wasUnexpected = data.wasUnexpected || false;
               
-              if (wasEstablished) {
+              if (wasEstablished && !wasUnexpected) {
                 toast({
                   title: "Sesiune Închisă",
                   description: "Sesiunea vocală s-a încheiat cu succes",
                 });
+              } else if (wasUnexpected && data.canRetry && retryCount < maxRetries) {
+                console.log('Unexpected session closure, attempting auto-recovery...');
+                toast({
+                  title: "Reconectare Automată",
+                  description: "Sesiunea s-a închis neașteptat. Se reîncearcă...",
+                });
+                setTimeout(() => {
+                  retryConnection();
+                }, 2000);
               } else {
                 toast({
                   title: "Conexiune Întreruptă",
-                  description: "Sesiunea s-a închis neașteptat",
+                  description: `Sesiunea s-a închis neașteptat (cod: ${data.closeCode})`,
                   variant: "destructive",
                 });
               }
               break;
 
+            case 'manual_intervention_required':
+              console.warn('Manual intervention required:', data.message);
+              setCanRetry(false);
+              toast({
+                title: "Intervenție Manuală Necesară",
+                description: data.message || "Eroare care necesită reconectare manuală",
+                variant: "destructive",
+              });
+              break;
+
             default:
-              console.log('Unhandled message type:', data.type);
+              console.log('Unhandled message type:', data.type, data);
           }
 
           // Update confidence if available
