@@ -6,10 +6,39 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Security constants and interfaces
 interface TTSRequest {
   text: string;
   voice?: string;
   format?: string;
+}
+
+const ALLOWED_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+const MAX_TEXT_LENGTH = 4000;
+const MAX_REQUEST_SIZE = 50000; // 50KB max request
+
+// Security validation functions
+function sanitizeInput(input: string): string {
+  if (typeof input !== 'string') return '';
+  return input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/[<>]/g, '')
+    .trim()
+    .substring(0, MAX_TEXT_LENGTH);
+}
+
+function validateMedicalEducationContent(text: string): boolean {
+  // Ensure content is appropriate for high school medical education
+  const prohibitedPatterns = [
+    /diagnostic\s+medical/i,
+    /tratament\s+pentru/i,
+    /medicament\s+pentru/i,
+    /prescriu/i,
+    /recomand\s+să\s+luați/i
+  ];
+
+  return !prohibitedPatterns.some(pattern => pattern.test(text));
 }
 
 serve(async (req) => {
@@ -24,12 +53,17 @@ serve(async (req) => {
       throw new Error('Missing OPENAI_API_KEY environment variable');
     }
 
-    // Parse and validate request body
+    // Parse and validate request body with security checks
+    const rawBody = await req.text();
+    if (rawBody.length > MAX_REQUEST_SIZE) {
+      throw new Error('Cererea este prea mare');
+    }
+
     let requestBody;
     try {
-      requestBody = await req.json();
+      requestBody = JSON.parse(rawBody);
     } catch (error) {
-      throw new Error('Invalid JSON in request body');
+      throw new Error('JSON invalid în corpul cererii');
     }
 
     const { 
@@ -38,23 +72,33 @@ serve(async (req) => {
       format = 'mp3'
     }: TTSRequest = requestBody;
 
-    // Validate required parameters
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      throw new Error('text is required and must be a non-empty string');
+    // Security validation: text
+    if (!text || typeof text !== 'string') {
+      throw new Error('Textul este obligatoriu și trebuie să fie un string');
+    }
+
+    // Sanitize and validate content
+    const sanitizedText = sanitizeInput(text);
+    if (sanitizedText.length === 0) {
+      throw new Error('Textul nu poate fi gol după sanitizare');
+    }
+
+    if (sanitizedText.length > MAX_TEXT_LENGTH) {
+      throw new Error(`Textul este prea lung (max ${MAX_TEXT_LENGTH} caractere)`);
+    }
+
+    // Validate educational content appropriateness
+    if (!validateMedicalEducationContent(sanitizedText)) {
+      throw new Error('Conținutul nu este potrivit pentru educația medicală');
     }
 
     // Validate voice parameter
-    const validVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
-    const selectedVoice = validVoices.includes(voice) ? voice : 'alloy';
+    const selectedVoice = ALLOWED_VOICES.includes(voice) ? voice : 'alloy';
 
-    console.log(`Processing text-to-speech: ${text.length} characters, voice: ${selectedVoice}`);
+    console.log(`Processing secure TTS: ${sanitizedText.length} characters, voice: ${selectedVoice}`);
 
-    // Truncate text if too long (OpenAI TTS has limits)
-    const maxLength = 4000;
-    const truncatedText = text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
-
-    // Generate speech with retry logic
-    const audioContent = await generateSpeech(openaiApiKey, truncatedText, selectedVoice);
+    // Generate speech with security controls
+    const audioContent = await generateSpeech(openaiApiKey, sanitizedText, selectedVoice);
 
     console.log(`Successfully generated speech: ${audioContent.length} characters (base64)`);
 
@@ -64,8 +108,9 @@ serve(async (req) => {
       metadata: {
         voice: selectedVoice,
         format: 'mp3',
-        textLength: text.length,
-        truncated: text.length > maxLength
+        textLength: sanitizedText.length,
+        originalLength: text.length,
+        sanitized: text !== sanitizedText
       }
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

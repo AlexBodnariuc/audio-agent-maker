@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { SecurityValidator, SECURITY_MESSAGES } from "@/lib/security";
 
 interface VoicePersonality {
   id: string;
@@ -182,6 +183,26 @@ export default function AgentTestingPanel({
   const sendTextMessage = async () => {
     if (!textInput.trim()) return;
 
+    // Security validation
+    if (!SecurityValidator.checkRateLimit('voice_chat', 10)) {
+      toast({
+        title: "Eroare",
+        description: SECURITY_MESSAGES.RATE_LIMIT_EXCEEDED,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const sanitizedInput = SecurityValidator.sanitizeText(textInput);
+    if (!sanitizedInput) {
+      toast({
+        title: "Eroare", 
+        description: SECURITY_MESSAGES.INVALID_INPUT,
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!conversationId) {
       const newConversationId = await createConversation();
       if (!newConversationId) return;
@@ -190,7 +211,7 @@ export default function AgentTestingPanel({
     const userMessage: Message = {
       id: Date.now().toString(),
       type: 'user',
-      content: textInput.trim(),
+      content: sanitizedInput,
       timestamp: new Date()
     };
 

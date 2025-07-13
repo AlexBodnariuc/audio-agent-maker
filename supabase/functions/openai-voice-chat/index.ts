@@ -7,12 +7,53 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Input validation and sanitization
 interface ChatRequest {
   conversationId: string;
   message: string;
   specialtyFocus?: string;
   useVoice?: boolean;
   voice?: string;
+}
+
+// Romanian medical education constants for MedMentor alignment
+const ROMANIAN_MEDICAL_SPECIALTIES = [
+  'biologie', 'chimie', 'anatomie', 'fiziologie', 'patologie', 'farmacologie',
+  'medicina generala', 'cardiologie', 'neurologie', 'pneumologie'
+];
+
+const ALLOWED_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+const MAX_MESSAGE_LENGTH = 2000;
+const MAX_CONVERSATION_HISTORY = 10;
+
+// Input sanitization functions
+function sanitizeInput(input: string): string {
+  if (typeof input !== 'string') return '';
+  
+  // Remove potential XSS and injection patterns
+  return input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/on\w+\s*=/gi, '')
+    .replace(/[<>]/g, '')
+    .trim()
+    .substring(0, MAX_MESSAGE_LENGTH);
+}
+
+function validateUUID(uuid: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(uuid);
+}
+
+function validateSpecialty(specialty: string): string {
+  const normalizedSpecialty = specialty.toLowerCase().trim();
+  return ROMANIAN_MEDICAL_SPECIALTIES.includes(normalizedSpecialty) 
+    ? normalizedSpecialty 
+    : 'medicina generala';
+}
+
+function rateLimitKey(conversationId: string): string {
+  return `voice_chat_${conversationId}`;
 }
 
 serve(async (req) => {
@@ -33,16 +74,20 @@ serve(async (req) => {
       auth: { persistSession: false }
     });
 
-    // Parse and validate request body
+    // Parse and validate request body with security checks
     let requestBody;
     try {
-      requestBody = await req.json();
-      console.log('Received request body:', JSON.stringify(requestBody, null, 2));
+      const rawBody = await req.text();
+      if (rawBody.length > 10000) { // Prevent large payload attacks
+        throw new Error('Request body too large');
+      }
+      requestBody = JSON.parse(rawBody);
     } catch (error) {
       console.error('Failed to parse request body:', error);
       throw new Error('Invalid JSON in request body');
     }
 
+    // Extract and validate parameters with input sanitization
     const { 
       conversationId, 
       message, 
@@ -51,26 +96,38 @@ serve(async (req) => {
       voice = 'alloy'
     }: ChatRequest = requestBody;
 
-    // Validate required parameters
-    if (!conversationId) {
-      console.error('Missing conversationId in request:', requestBody);
-      throw new Error('conversationId is required');
+    // Security validation: conversationId
+    if (!conversationId || typeof conversationId !== 'string') {
+      throw new Error('conversationId is required and must be a string');
+    }
+    
+    if (!validateUUID(conversationId)) {
+      throw new Error('conversationId must be a valid UUID');
     }
 
-    if (!message || typeof message !== 'string' || message.trim().length === 0) {
-      console.error('Invalid message in request:', { message, type: typeof message, requestBody });
-      throw new Error('message is required and must be a non-empty string');
+    // Security validation: message
+    if (!message || typeof message !== 'string') {
+      throw new Error('message is required and must be a string');
     }
 
-    // Validate optional parameters
-    if (voice && !['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(voice)) {
-      console.warn(`Invalid voice "${voice}", using default "alloy"`);
-      // Don't throw, just use default
+    const sanitizedMessage = sanitizeInput(message);
+    if (sanitizedMessage.length === 0) {
+      throw new Error('message cannot be empty after sanitization');
     }
 
-    console.log(`Processing OpenAI voice chat for conversation: ${conversationId}, message length: ${message.length}`);
+    if (sanitizedMessage.length > MAX_MESSAGE_LENGTH) {
+      throw new Error(`message too long (max ${MAX_MESSAGE_LENGTH} characters)`);
+    }
 
-    // Get conversation context with timeout
+    // Security validation: specialtyFocus
+    const validatedSpecialty = specialtyFocus 
+      ? validateSpecialty(specialtyFocus) 
+      : 'medicina generala';
+
+    // Security validation: voice
+    const validatedVoice = ALLOWED_VOICES.includes(voice) ? voice : 'alloy';
+
+    // Get conversation context with security validation and timeout
     const conversationPromise = supabase
       .from('conversations')
       .select(`
@@ -85,7 +142,7 @@ serve(async (req) => {
       .single();
 
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Conversation query timeout')), 10000);
+      setTimeout(() => reject(new Error('Timeout în obținerea conversației')), 5000);
     });
 
     const { data: conversation, error: convError } = await Promise.race([
@@ -94,14 +151,20 @@ serve(async (req) => {
     ]) as any;
 
     if (convError) {
-      throw new Error(`Failed to get conversation: ${convError.message}`);
+      throw new Error(`Eroare la obținerea conversației: ${convError.message}`);
     }
 
     if (!conversation) {
-      throw new Error('Conversation not found');
+      throw new Error('Conversația nu a fost găsită');
     }
 
-    // Get recent conversation history with error handling
+    // Rate limiting check (basic implementation)
+    const rateLimitCheck = await checkRateLimit(supabase, conversationId);
+    if (!rateLimitCheck.allowed) {
+      throw new Error('Prea multe cereri. Vă rugăm să așteptați.');
+    }
+
+    // Get recent conversation history with security filtering
     let messages = [];
     try {
       const { data: messageHistory, error: messagesError } = await supabase
@@ -109,53 +172,58 @@ serve(async (req) => {
         .select('content, message_type, timestamp')
         .eq('conversation_id', conversationId)
         .order('timestamp', { ascending: true })
-        .limit(10);
+        .limit(MAX_CONVERSATION_HISTORY);
 
       if (messagesError) {
         console.error('Error getting message history:', messagesError);
-        // Continue without history rather than failing
       } else {
-        messages = messageHistory || [];
+        // Sanitize message history
+        messages = (messageHistory || []).map(msg => ({
+          ...msg,
+          content: sanitizeInput(msg.content || '')
+        })).filter(msg => msg.content.length > 0);
       }
     } catch (error) {
       console.error('Error fetching message history:', error);
-      // Continue without history
     }
 
-    // Build conversation context for OpenAI
-    const systemPrompt = buildSystemPrompt(conversation, specialtyFocus);
+    // Build secure conversation context for OpenAI
+    const systemPrompt = buildMedMentorSystemPrompt(conversation, validatedSpecialty);
     const conversationHistory = buildConversationHistory(messages);
 
-    // Generate AI response with retry logic
+    // Generate AI response with security controls
     let aiResponse;
     try {
       aiResponse = await generateAIResponse(
         openaiApiKey,
         systemPrompt,
         conversationHistory,
-        message
+        sanitizedMessage
       );
     } catch (error) {
       console.error('Error generating AI response:', error);
-      throw new Error(`Failed to generate AI response: ${error.message}`);
+      throw new Error(`Eroare la generarea răspunsului AI: ${error.message}`);
     }
 
     if (!aiResponse || typeof aiResponse !== 'string' || aiResponse.trim().length === 0) {
-      throw new Error('Generated AI response is empty or invalid');
+      throw new Error('Răspunsul AI generat este invalid');
     }
 
-    // Store messages in database (with error handling to not block response)
+    // Sanitize AI response for safety
+    const sanitizedAIResponse = sanitizeInput(aiResponse);
+
+    // Store messages in database with sanitized content
     try {
       const messageInserts = [
         {
           conversation_id: conversationId,
-          content: message.trim(),
+          content: sanitizedMessage,
           message_type: 'user',
           timestamp: new Date().toISOString()
         },
         {
           conversation_id: conversationId,
-          content: aiResponse.trim(),
+          content: sanitizedAIResponse,
           message_type: 'assistant',
           timestamp: new Date().toISOString()
         }
@@ -167,21 +235,18 @@ serve(async (req) => {
 
       if (insertError) {
         console.error('Error storing messages:', insertError);
-        // Continue without storing - don't fail the request
       }
     } catch (error) {
       console.error('Error storing conversation messages:', error);
-      // Continue without storing
     }
 
-    // Generate speech with proper error handling
+    // Generate speech with security validation
     let audioContent = null;
-    if (useVoice && aiResponse) {
+    if (useVoice && sanitizedAIResponse) {
       try {
-        audioContent = await generateSpeech(openaiApiKey, aiResponse, voice);
+        audioContent = await generateSpeech(openaiApiKey, sanitizedAIResponse, validatedVoice);
       } catch (speechError) {
         console.error('Error generating speech:', speechError);
-        // Continue without audio rather than failing completely
         audioContent = null;
       }
     }
@@ -243,32 +308,89 @@ serve(async (req) => {
   }
 });
 
-function buildSystemPrompt(conversation: any, specialtyFocus?: string): string {
+// Rate limiting function for security
+async function checkRateLimit(supabase: any, conversationId: string): Promise<{ allowed: boolean; remaining?: number }> {
+  try {
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - 60000); // 1 minute window
+    
+    // Check existing rate limit entries
+    const { data: rateLimits, error } = await supabase
+      .from('rate_limits')
+      .select('*')
+      .eq('identifier', conversationId)
+      .eq('action', 'voice_chat')
+      .gte('window_start', windowStart.toISOString());
+
+    if (error) {
+      console.error('Rate limit check error:', error);
+      return { allowed: true }; // Allow on error to prevent blocking
+    }
+
+    const currentCount = rateLimits?.length || 0;
+    const maxRequests = 20; // 20 requests per minute
+
+    if (currentCount >= maxRequests) {
+      return { allowed: false };
+    }
+
+    // Insert new rate limit entry
+    await supabase
+      .from('rate_limits')
+      .insert({
+        identifier: conversationId,
+        identifier_type: 'conversation',
+        action: 'voice_chat',
+        count: 1,
+        max_attempts: maxRequests,
+        window_start: windowStart.toISOString(),
+        window_duration: '00:01:00'
+      });
+
+    return { allowed: true, remaining: maxRequests - currentCount - 1 };
+  } catch (error) {
+    console.error('Rate limiting error:', error);
+    return { allowed: true }; // Allow on error
+  }
+}
+
+// MedMentor-focused system prompt with Romanian medical education context
+function buildMedMentorSystemPrompt(conversation: any, specialtyFocus: string): string {
   const personality = conversation.voice_personalities;
-  const specialty = specialtyFocus || personality?.medical_specialty || 'general medicine';
+  const name = personality?.name || 'MedMentor';
   
-  return `You are ${personality?.name || 'MedMentor'}, an expert AI medical education assistant specializing in ${specialty}.
+  return `Ești ${name}, un asistent AI expert în educația medicală românească, specializat în ${specialtyFocus}.
 
-Your role is to:
-- Provide accurate, evidence-based medical education content
-- Adapt your teaching style to the student's level
-- Use clear, professional medical terminology
-- Encourage critical thinking and clinical reasoning
-- Provide interactive learning experiences
-- Ensure patient safety principles are always emphasized
+CONTEXTUL MEDMENTOR:
+- Ești dedicat pregătirii elevilor români pentru admiterea la UMF (Universitatea de Medicină și Farmacie)
+- Te focusezi pe biologia și chimia de liceu (clasele XI-XII)
+- Bazezi răspunsurile pe manualele românești (ex: Corint Bio XI-XII, manualele de chimie)
+- Ajuți la pregătirea pentru examenele de admitere la medicina din România
 
-Current learning context:
-- Specialty focus: ${specialty}
-- Session type: ${conversation.voice_session_type || 'general learning'}
-- Learning objectives: Progressive skill building in ${specialty}
+ROLUL TĂU:
+- Oferă conținut educațional precis, bazat pe curriculum-ul românesc
+- Adaptează stilul de predare la nivelul elevului de liceu
+- Folosește terminologie medicală clară și profesională, cu explicații
+- Încurajează gândirea critică și raționamentul logic
+- Oferă experiențe de învățare interactive
+- Menții principiile siguranței pacientului
 
-Guidelines:
-- Keep responses conversational but educational (200-300 words maximum)
-- Use appropriate medical terminology with explanations
-- Encourage questions and deeper exploration
-- Provide practical clinical context when relevant
-- Maintain professional standards throughout
-- Be concise and focused in your responses`;
+CONTEXTUL ACTUAL:
+- Specialitate focus: ${specialtyFocus}
+- Tip sesiune: ${conversation.voice_session_type || 'învățare generală'}
+- Obiective: Dezvoltarea progresivă a cunoștințelor în ${specialtyFocus}
+
+GHIDUL RĂSPUNSURILOR:
+- Ține răspunsurile conversaționale dar educaționale (200-300 cuvinte maxim)
+- Folosește terminologie medicală cu explicații în română
+- Încurajează întrebări și explorare mai profundă
+- Oferă context practic relevant pentru admiterea la medicină
+- Menții standarde profesionale
+- Fii concis și focalizat
+- Răspunde ÎNTOTDEAUNA în limba română
+- Focusează-te pe biologia și chimia de liceu, NU pe specialități medicale avansate
+
+IMPORTANT: Ești un mentor pentru elevii de liceu care se pregătesc pentru admiterea la medicină în România. Nu oferi consiliere medicală, ci doar educație pentru examene.`;
 }
 
 function buildConversationHistory(messages: any[]): any[] {

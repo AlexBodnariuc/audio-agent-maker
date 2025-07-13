@@ -7,11 +7,31 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Security constants and validation
 interface TranscriptionRequest {
   audio: string; // base64 encoded audio
   conversationId: string;
   language?: string;
   prompt?: string;
+}
+
+const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB max audio size
+const ALLOWED_LANGUAGES = ['ro', 'en', 'fr', 'de', 'es', 'it'];
+
+// Input validation functions
+function validateUUID(uuid: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(uuid);
+}
+
+function sanitizeInput(input: string): string {
+  if (typeof input !== 'string') return '';
+  return input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/[<>]/g, '')
+    .trim()
+    .substring(0, 2000);
 }
 
 serve(async (req) => {
@@ -32,18 +52,36 @@ serve(async (req) => {
       auth: { persistSession: false }
     });
 
+    // Parse and validate request with security checks
+    const requestBody = await req.json();
     const { 
       audio, 
       conversationId, 
-      language = 'en',
+      language = 'ro', // Default to Romanian for MedMentor
       prompt
-    }: TranscriptionRequest = await req.json();
+    }: TranscriptionRequest = requestBody;
 
-    if (!audio || !conversationId) {
-      throw new Error('audio and conversationId are required');
+    // Security validation
+    if (!audio || typeof audio !== 'string') {
+      throw new Error('Audio este obligatoriu și trebuie să fie un string');
     }
 
-    console.log(`Processing speech-to-text for conversation: ${conversationId}`);
+    if (!conversationId || typeof conversationId !== 'string' || !validateUUID(conversationId)) {
+      throw new Error('ID-ul conversației este invalid');
+    }
+
+    // Validate audio size (base64 size ~= actual size * 1.37)
+    if (audio.length > MAX_AUDIO_SIZE * 1.37) {
+      throw new Error('Fișierul audio este prea mare (max 25MB)');
+    }
+
+    // Validate language for security
+    const validatedLanguage = ALLOWED_LANGUAGES.includes(language) ? language : 'ro';
+
+    // Sanitize prompt if provided
+    const sanitizedPrompt = prompt ? sanitizeInput(prompt) : undefined;
+
+    console.log(`Processing speech-to-text for conversation: ${conversationId}, language: ${validatedLanguage}`);
 
     // Process audio in chunks to prevent memory issues
     const binaryAudio = processBase64Chunks(audio);
@@ -53,10 +91,10 @@ serve(async (req) => {
     const blob = new Blob([binaryAudio], { type: 'audio/webm' });
     formData.append('file', blob, 'audio.webm');
     formData.append('model', 'whisper-1');
-    formData.append('language', language);
+    formData.append('language', validatedLanguage);
     
-    if (prompt) {
-      formData.append('prompt', prompt);
+    if (sanitizedPrompt) {
+      formData.append('prompt', sanitizedPrompt);
     }
 
     // Send to OpenAI Whisper API
@@ -214,21 +252,29 @@ async function analyzeTranscription(text: string, apiKey: string): Promise<{
   }
 }
 
+// Romanian medical keywords for MedMentor alignment
 function extractMedicalKeywords(text: string): string[] {
-  const medicalTerms = [
-    'heart', 'cardiac', 'cardiology', 'myocardial', 'ventricle', 'atrium',
-    'lung', 'pulmonary', 'respiratory', 'bronchi', 'alveoli',
-    'brain', 'neural', 'neurology', 'cerebral', 'cortex',
-    'kidney', 'renal', 'nephrology', 'glomerular',
-    'liver', 'hepatic', 'hepatology',
-    'blood', 'hematology', 'hemoglobin', 'platelet',
-    'bone', 'skeletal', 'orthopedic', 'fracture',
-    'muscle', 'muscular', 'myalgia',
-    'diabetes', 'hypertension', 'infection', 'inflammation',
-    'surgery', 'procedure', 'diagnosis', 'treatment',
-    'medication', 'prescription', 'dosage', 'therapy'
+  const romanianMedicalTerms = [
+    // Biology terms (Romanian high school curriculum)
+    'celulă', 'celule', 'mitocondrie', 'ADN', 'ARN', 'proteină', 'enzimă',
+    'fotosinteza', 'respirație', 'metabolism', 'hormon', 'reflex',
+    'sistem nervos', 'sistem circulator', 'sistem digestiv', 'sistem respirator',
+    'inimă', 'cardiac', 'plămân', 'pulmonar', 'creier', 'neural',
+    'rinichi', 'renal', 'ficat', 'hepatic', 'sânge', 'hematologie',
+    'os', 'oase', 'mușchi', 'muschi', 'diabet', 'hipertensiune',
+    
+    // Chemistry terms (Romanian high school curriculum)
+    'atom', 'moleculă', 'element', 'compus', 'ionul', 'cation', 'anion',
+    'acid', 'bază', 'sare', 'oxidare', 'reducere', 'reacție', 'catalizator',
+    'pH', 'soluție', 'concentrație', 'molaritate', 'electroliză',
+    'chimie organică', 'hidrocarbon', 'alcool', 'acid', 'ester',
+    'proteină', 'aminoacid', 'glucoză', 'lipide', 'vitamină',
+    
+    // Medical terms relevant for admission
+    'anatomie', 'fiziologie', 'patologie', 'diagnostic', 'tratament',
+    'medicament', 'terapie', 'chirurgie', 'procedură', 'infecție', 'inflamație'
   ];
 
   const lowerText = text.toLowerCase();
-  return medicalTerms.filter(term => lowerText.includes(term));
+  return romanianMedicalTerms.filter(term => lowerText.includes(term));
 }
