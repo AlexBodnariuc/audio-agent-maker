@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import QuizCard from "@/components/medmentor/QuizCard";
 import StudentDashboard from "@/components/medmentor/StudentDashboard";
-import VoiceQuizAssistant from "@/components/medmentor/VoiceQuizAssistant";
+import EnhancedVoiceQuizAssistant from "@/components/medmentor/EnhancedVoiceQuizAssistant";
 import { 
   GraduationCap, 
   BookOpen, 
@@ -22,9 +22,11 @@ import {
   Play,
   Heart,
   Clock,
-  Globe
+  Globe,
+  Bot
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
 // Sample quiz data for Romanian medical school preparation
 const sampleBiologyQuiz = [
@@ -93,6 +95,7 @@ export default function Index() {
   const [currentView, setCurrentView] = useState<"landing" | "dashboard" | "quiz">("landing");
   const [selectedQuizType, setSelectedQuizType] = useState<"biology" | "chemistry" | null>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const handleStartQuiz = (subject: "biology" | "chemistry") => {
     setSelectedQuizType(subject);
@@ -206,9 +209,10 @@ export default function Index() {
               />
             </div>
             <div className="lg:col-span-1">
-              <VoiceQuizAssistant 
+              <EnhancedVoiceQuizAssistant 
                 question={quizData[0]?.question}
                 subject={selectedQuizType}
+                quizSessionId="demo-session"
                 onTranscriptionReceived={(text) => console.log("Received:", text)}
                 onAskForHelp={(question) => console.log("Help with:", question)}
               />
@@ -366,6 +370,14 @@ export default function Index() {
                 >
                   <Target className="h-4 w-4 mr-2" />
                   Dashboard Student
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => navigate("/voice-assistants")}
+                  className="border-medical-purple/30 text-medical-purple hover:bg-medical-purple/5"
+                >
+                  <Bot className="h-4 w-4 mr-2" />
+                  Asistenți Vocali
                 </Button>
               </CardContent>
             </Card>
