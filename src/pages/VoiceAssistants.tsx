@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import VoiceAgentCard from "@/components/voice/VoiceAgentCard";
 import CreateAgentDialog from "@/components/voice/CreateAgentDialog";
 import AgentTestingPanel from "@/components/voice/AgentTestingPanel";
+import VoiceTutorPanel from "@/components/VoiceTutorPanel";
 import { ROMANIAN_TRANSLATIONS } from "@/components/medmentor/RomanianUI";
 
 interface VoicePersonality {
@@ -31,12 +32,39 @@ export default function VoiceAssistants() {
   const [retrying, setRetrying] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [operationInProgress, setOperationInProgress] = useState<string | null>(null);
+  const [testConversationId, setTestConversationId] = useState<string>('');
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchVoicePersonalities();
+    // Create a test conversation ID for realtime voice testing
+    createTestConversation();
   }, []);
+
+  const createTestConversation = async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke('create-conversation', {
+        body: {
+          specialtyFocus: 'biologie',
+          sessionType: 'realtime_voice_test',
+          quizSessionId: null
+        }
+      });
+
+      if (error) {
+        console.error('Error creating test conversation:', error);
+        return;
+      }
+
+      if (data?.conversationId) {
+        setTestConversationId(data.conversationId);
+        console.log('Test conversation created:', data.conversationId);
+      }
+    } catch (error) {
+      console.error('Error creating test conversation:', error);
+    }
+  };
 
   const fetchVoicePersonalities = async (showRetryToast = false) => {
     try {
@@ -275,8 +303,12 @@ export default function VoiceAssistants() {
           </div>
         </div>
 
-        <Tabs defaultValue="manage" className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-2">
+        <Tabs defaultValue="realtime" className="space-y-6">
+          <TabsList className="grid w-full max-w-2xl grid-cols-3">
+            <TabsTrigger value="realtime" className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />
+              🎙️ Voce Real-Time
+            </TabsTrigger>
             <TabsTrigger value="manage" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
               Gestionează
@@ -286,6 +318,52 @@ export default function VoiceAssistants() {
               Testează
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="realtime" className="space-y-6">
+            {testConversationId ? (
+              <div className="space-y-4">
+                <Alert className="border-primary/20 bg-primary/5">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <AlertDescription>
+                    <strong>🚀 Test Real-Time Voice:</strong> Testează conversația vocală cu OpenAI Realtime API. 
+                    Vorbește în română și primești răspunsuri instantanee!
+                  </AlertDescription>
+                </Alert>
+                
+                <VoiceTutorPanel 
+                  conversationId={testConversationId}
+                  specialtyFocus="biologie"
+                  voice="alloy"
+                  onSessionEnd={() => {
+                    toast({
+                      title: "Sesiune Închisă",
+                      description: "Poți începe o nouă sesiune oricând!",
+                    });
+                  }}
+                />
+              </div>
+            ) : (
+              <Card className="text-center py-12">
+                <CardContent>
+                  <RefreshCw className="h-16 w-16 text-muted-foreground mx-auto mb-4 animate-pulse" />
+                  <h3 className="text-lg font-semibold mb-2">
+                    Pregătire Sesiune Vocală...
+                  </h3>
+                  <p className="text-muted-foreground">
+                    Se creează o conversație de test pentru funcționalitatea vocală
+                  </p>
+                  <Button 
+                    onClick={createTestConversation}
+                    variant="outline"
+                    className="mt-4"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Reîncearcă
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
 
           <TabsContent value="manage" className="space-y-6">
             {personalities.length === 0 ? (
