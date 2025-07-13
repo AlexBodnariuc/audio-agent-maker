@@ -1,60 +1,56 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.50.5";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Input validation and sanitization
-interface ChatRequest {
-  conversationId: string;
-  message: string;
-  specialtyFocus?: string;
-  useVoice?: boolean;
-  voice?: string;
-}
-
-// Romanian medical education constants for MedMentor alignment
+// Validation schemas with Zod
+const MAX_MESSAGE_LENGTH = 2000;
+const MAX_REQUEST_SIZE = 50000;
+const ALLOWED_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
 const ROMANIAN_MEDICAL_SPECIALTIES = [
   'biologie', 'chimie', 'anatomie', 'fiziologie', 'patologie', 'farmacologie',
   'medicina generala', 'cardiologie', 'neurologie', 'pneumologie'
-];
+] as const;
 
-const ALLOWED_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
-const MAX_MESSAGE_LENGTH = 2000;
+const sanitizedTextSchema = z
+  .string()
+  .min(1, 'Textul nu poate fi gol')
+  .max(MAX_MESSAGE_LENGTH, `Textul este prea lung (max ${MAX_MESSAGE_LENGTH} caractere)`)
+  .transform((val) => {
+    return val
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/javascript:/gi, '')
+      .replace(/on\w+\s*=/gi, '')
+      .replace(/[<>]/g, '')
+      .trim();
+  })
+  .refine((val) => val.length > 0, 'Textul nu poate fi gol după sanitizare');
+
+const voiceChatRequestSchema = z.object({
+  conversationId: z.string().uuid('ID-ul conversației este invalid'),
+  message: sanitizedTextSchema,
+  specialtyFocus: z
+    .string()
+    .optional()
+    .transform((val) => {
+      if (!val) return 'medicina generala';
+      const normalized = val.toLowerCase().trim();
+      return ROMANIAN_MEDICAL_SPECIALTIES.includes(normalized as any) 
+        ? normalized 
+        : 'medicina generala';
+    }),
+  useVoice: z.boolean().default(false),
+  voice: z.enum(ALLOWED_VOICES).default('alloy'),
+  ttsOnly: z.boolean().default(false),
+  text: z.string().optional(),
+});
+
 const MAX_CONVERSATION_HISTORY = 10;
-
-// Input sanitization functions
-function sanitizeInput(input: string): string {
-  if (typeof input !== 'string') return '';
-  
-  // Remove potential XSS and injection patterns
-  return input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/javascript:/gi, '')
-    .replace(/on\w+\s*=/gi, '')
-    .replace(/[<>]/g, '')
-    .trim()
-    .substring(0, MAX_MESSAGE_LENGTH);
-}
-
-function validateUUID(uuid: string): boolean {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(uuid);
-}
-
-function validateSpecialty(specialty: string): string {
-  const normalizedSpecialty = specialty.toLowerCase().trim();
-  return ROMANIAN_MEDICAL_SPECIALTIES.includes(normalizedSpecialty) 
-    ? normalizedSpecialty 
-    : 'medicina generala';
-}
-
-function rateLimitKey(conversationId: string): string {
-  return `voice_chat_${conversationId}`;
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -74,58 +70,36 @@ serve(async (req) => {
       auth: { persistSession: false }
     });
 
-    // Parse and validate request body with security checks
-    let requestBody;
+    // Parse and validate request body with Zod
+    const rawBody = await req.text();
+    if (rawBody.length > MAX_REQUEST_SIZE) {
+      throw new Error('Cererea este prea mare');
+    }
+
+    let parsedBody;
     try {
-      const rawBody = await req.text();
-      if (rawBody.length > 10000) { // Prevent large payload attacks
-        throw new Error('Request body too large');
-      }
-      requestBody = JSON.parse(rawBody);
+      parsedBody = JSON.parse(rawBody);
     } catch (error) {
       console.error('Failed to parse request body:', error);
-      throw new Error('Invalid JSON in request body');
+      throw new Error('JSON invalid în corpul cererii');
     }
 
-    // Extract and validate parameters with input sanitization
+    // Validate with Zod schema
+    const validationResult = voiceChatRequestSchema.safeParse(parsedBody);
+    if (!validationResult.success) {
+      const firstError = validationResult.error.errors[0];
+      throw new Error(firstError?.message || 'Validation error');
+    }
+
     const { 
       conversationId, 
-      message, 
-      specialtyFocus, 
-      useVoice = false,
-      voice = 'alloy'
-    }: ChatRequest = requestBody;
-
-    // Security validation: conversationId
-    if (!conversationId || typeof conversationId !== 'string') {
-      throw new Error('conversationId is required and must be a string');
-    }
-    
-    if (!validateUUID(conversationId)) {
-      throw new Error('conversationId must be a valid UUID');
-    }
-
-    // Security validation: message
-    if (!message || typeof message !== 'string') {
-      throw new Error('message is required and must be a string');
-    }
-
-    const sanitizedMessage = sanitizeInput(message);
-    if (sanitizedMessage.length === 0) {
-      throw new Error('message cannot be empty after sanitization');
-    }
-
-    if (sanitizedMessage.length > MAX_MESSAGE_LENGTH) {
-      throw new Error(`message too long (max ${MAX_MESSAGE_LENGTH} characters)`);
-    }
-
-    // Security validation: specialtyFocus
-    const validatedSpecialty = specialtyFocus 
-      ? validateSpecialty(specialtyFocus) 
-      : 'medicina generala';
-
-    // Security validation: voice
-    const validatedVoice = ALLOWED_VOICES.includes(voice) ? voice : 'alloy';
+      message: sanitizedMessage, 
+      specialtyFocus: validatedSpecialty, 
+      useVoice,
+      voice: validatedVoice,
+      ttsOnly,
+      text
+    } = validationResult.data;
 
     // Get conversation context with security validation and timeout
     const conversationPromise = supabase
@@ -177,11 +151,14 @@ serve(async (req) => {
       if (messagesError) {
         console.error('Error getting message history:', messagesError);
       } else {
-        // Sanitize message history
-        messages = (messageHistory || []).map(msg => ({
-          ...msg,
-          content: sanitizeInput(msg.content || '')
-        })).filter(msg => msg.content.length > 0);
+        // Sanitize message history using the schema
+        messages = (messageHistory || []).map(msg => {
+          const sanitized = sanitizedTextSchema.safeParse(msg.content || '');
+          return {
+            ...msg,
+            content: sanitized.success ? sanitized.data : ''
+          };
+        }).filter(msg => msg.content.length > 0);
       }
     } catch (error) {
       console.error('Error fetching message history:', error);
@@ -210,7 +187,8 @@ serve(async (req) => {
     }
 
     // Sanitize AI response for safety
-    const sanitizedAIResponse = sanitizeInput(aiResponse);
+    const sanitizedResponse = sanitizedTextSchema.safeParse(aiResponse);
+    const sanitizedAIResponse = sanitizedResponse.success ? sanitizedResponse.data : aiResponse;
 
     // Store messages in database with sanitized content
     try {

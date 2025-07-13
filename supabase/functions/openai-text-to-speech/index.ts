@@ -1,32 +1,35 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Security constants and interfaces
-interface TTSRequest {
-  text: string;
-  voice?: string;
-  format?: string;
-}
-
-const ALLOWED_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+// Validation schemas with Zod
+const ALLOWED_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
 const MAX_TEXT_LENGTH = 4000;
 const MAX_REQUEST_SIZE = 50000; // 50KB max request
 
-// Security validation functions
-function sanitizeInput(input: string): string {
-  if (typeof input !== 'string') return '';
-  return input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/javascript:/gi, '')
-    .replace(/[<>]/g, '')
-    .trim()
-    .substring(0, MAX_TEXT_LENGTH);
-}
+const sanitizedTextSchema = z
+  .string()
+  .min(1, 'Textul nu poate fi gol')
+  .max(MAX_TEXT_LENGTH, `Textul este prea lung (max ${MAX_TEXT_LENGTH} caractere)`)
+  .transform((val) => {
+    return val
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/javascript:/gi, '')
+      .replace(/[<>]/g, '')
+      .trim();
+  })
+  .refine((val) => val.length > 0, 'Textul nu poate fi gol după sanitizare');
+
+const textToSpeechRequestSchema = z.object({
+  text: sanitizedTextSchema,
+  voice: z.enum(ALLOWED_VOICES).default('alloy'),
+  format: z.enum(['mp3', 'opus', 'aac', 'flac']).default('mp3'),
+});
 
 function validateMedicalEducationContent(text: string): boolean {
   // Ensure content is appropriate for high school medical education
@@ -53,47 +56,36 @@ serve(async (req) => {
       throw new Error('Missing OPENAI_API_KEY environment variable');
     }
 
-    // Parse and validate request body with security checks
+    // Parse and validate request body with Zod
     const rawBody = await req.text();
     if (rawBody.length > MAX_REQUEST_SIZE) {
       throw new Error('Cererea este prea mare');
     }
 
-    let requestBody;
+    let parsedBody;
     try {
-      requestBody = JSON.parse(rawBody);
+      parsedBody = JSON.parse(rawBody);
     } catch (error) {
       throw new Error('JSON invalid în corpul cererii');
     }
 
+    // Validate with Zod schema
+    const validationResult = textToSpeechRequestSchema.safeParse(parsedBody);
+    if (!validationResult.success) {
+      const firstError = validationResult.error.errors[0];
+      throw new Error(firstError?.message || 'Validation error');
+    }
+
     const { 
-      text, 
-      voice = 'alloy',
-      format = 'mp3'
-    }: TTSRequest = requestBody;
-
-    // Security validation: text
-    if (!text || typeof text !== 'string') {
-      throw new Error('Textul este obligatoriu și trebuie să fie un string');
-    }
-
-    // Sanitize and validate content
-    const sanitizedText = sanitizeInput(text);
-    if (sanitizedText.length === 0) {
-      throw new Error('Textul nu poate fi gol după sanitizare');
-    }
-
-    if (sanitizedText.length > MAX_TEXT_LENGTH) {
-      throw new Error(`Textul este prea lung (max ${MAX_TEXT_LENGTH} caractere)`);
-    }
+      text: sanitizedText, 
+      voice: selectedVoice,
+      format
+    } = validationResult.data;
 
     // Validate educational content appropriateness
     if (!validateMedicalEducationContent(sanitizedText)) {
       throw new Error('Conținutul nu este potrivit pentru educația medicală');
     }
-
-    // Validate voice parameter
-    const selectedVoice = ALLOWED_VOICES.includes(voice) ? voice : 'alloy';
 
     console.log(`Processing secure TTS: ${sanitizedText.length} characters, voice: ${selectedVoice}`);
 
@@ -109,8 +101,8 @@ serve(async (req) => {
         voice: selectedVoice,
         format: 'mp3',
         textLength: sanitizedText.length,
-        originalLength: text.length,
-        sanitized: text !== sanitizedText
+        originalLength: parsedBody.text?.length || 0,
+        sanitized: parsedBody.text !== sanitizedText
       }
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

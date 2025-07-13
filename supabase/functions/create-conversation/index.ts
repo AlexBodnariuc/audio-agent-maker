@@ -1,6 +1,13 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.5';
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+
+const requestSchema = z.object({
+  specialtyFocus: z.string().default('general'),
+  quizSessionId: z.string().uuid().optional(),
+  sessionType: z.enum(['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance']).default('enhanced_voice_learning'),
+});
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,7 +26,12 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
     );
 
-    const { specialtyFocus, quizSessionId, sessionType } = await req.json();
+    const rawBody = await req.json();
+    const validationResult = requestSchema.safeParse(rawBody);
+    if (!validationResult.success) {
+      throw new Error('Invalid request parameters');
+    }
+    const { specialtyFocus, quizSessionId, sessionType } = validationResult.data;
 
     console.log('Creating conversation with:', { specialtyFocus, quizSessionId, sessionType });
 

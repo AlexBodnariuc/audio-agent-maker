@@ -78,13 +78,28 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   }, [toast, onError]);
 
   const endSession = useCallback(() => {
+    // Clean up media recorder
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
+      
+      // Stop all tracks to release microphone
+      if (mediaRecorderRef.current.stream) {
+        mediaRecorderRef.current.stream.getTracks().forEach(track => {
+          track.stop();
+        });
+      }
     }
     
+    // Clean up audio element
     if (audioElementRef.current) {
       audioElementRef.current.pause();
+      audioElementRef.current.src = '';
+      audioElementRef.current.load();
     }
+
+    // Clear refs to prevent memory leaks
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
 
     setSession(null);
     setMessages([]);
@@ -158,6 +173,13 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
   const stopListening = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
+      
+      // Stop all tracks to release microphone
+      if (mediaRecorderRef.current.stream) {
+        mediaRecorderRef.current.stream.getTracks().forEach(track => {
+          track.stop();
+        });
+      }
     }
     setSession(prev => prev ? { ...prev, isListening: false } : null);
   }, []);
@@ -492,11 +514,28 @@ export const useOpenAIVoice = (options: OpenAIVoiceHookOptions = {}) => {
       const blob = new Blob([arrayBuffer], { type: 'audio/mp3' });
       const audioUrl = URL.createObjectURL(blob);
 
+      // Clean up previous audio URL to prevent memory leaks
+      if (audioElementRef.current?.src) {
+        URL.revokeObjectURL(audioElementRef.current.src);
+      }
+
       if (audioElementRef.current) {
         audioElementRef.current.src = audioUrl;
+        
+        // Add event listener to clean up URL after playback
+        audioElementRef.current.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+        };
+        
         await audioElementRef.current.play();
       } else {
         audioElementRef.current = new Audio(audioUrl);
+        
+        // Add event listener to clean up URL after playback
+        audioElementRef.current.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+        };
+        
         await audioElementRef.current.play();
       }
 

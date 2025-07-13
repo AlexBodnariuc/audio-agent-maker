@@ -1,38 +1,43 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.50.5";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Security constants and validation
-interface TranscriptionRequest {
-  audio: string; // base64 encoded audio
-  conversationId: string;
-  language?: string;
-  prompt?: string;
-}
-
+// Validation schemas with Zod
 const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB max audio size
-const ALLOWED_LANGUAGES = ['ro', 'en', 'fr', 'de', 'es', 'it'];
+const MAX_REQUEST_SIZE = 50000; // 50KB max request
+const ALLOWED_LANGUAGES = ['ro', 'en', 'fr', 'de', 'es', 'it'] as const;
 
-// Input validation functions
-function validateUUID(uuid: string): boolean {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(uuid);
-}
+const sanitizedTextSchema = z
+  .string()
+  .min(1, 'Textul nu poate fi gol')
+  .max(2000, 'Textul este prea lung')
+  .transform((val) => {
+    return val
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/javascript:/gi, '')
+      .replace(/[<>]/g, '')
+      .trim();
+  })
+  .refine((val) => val.length > 0, 'Textul nu poate fi gol după sanitizare');
 
-function sanitizeInput(input: string): string {
-  if (typeof input !== 'string') return '';
-  return input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/javascript:/gi, '')
-    .replace(/[<>]/g, '')
-    .trim()
-    .substring(0, 2000);
-}
+const speechToTextRequestSchema = z.object({
+  audio: z
+    .string()
+    .min(1, 'Audio este obligatoriu')
+    .refine((val) => {
+      // Validate base64 size (base64 size ~= actual size * 1.37)
+      return val.length <= MAX_AUDIO_SIZE * 1.37;
+    }, 'Fișierul audio este prea mare (max 25MB)'),
+  conversationId: z.string().uuid('ID-ul conversației este invalid'),
+  language: z.enum(ALLOWED_LANGUAGES).default('ro'),
+  prompt: sanitizedTextSchema.optional(),
+});
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -52,34 +57,22 @@ serve(async (req) => {
       auth: { persistSession: false }
     });
 
-    // Parse and validate request with security checks
-    const requestBody = await req.json();
+    // Parse and validate request with Zod
+    const rawBody = await req.json();
+    
+    // Validate with Zod schema
+    const validationResult = speechToTextRequestSchema.safeParse(rawBody);
+    if (!validationResult.success) {
+      const firstError = validationResult.error.errors[0];
+      throw new Error(firstError?.message || 'Validation error');
+    }
+
     const { 
       audio, 
       conversationId, 
-      language = 'ro', // Default to Romanian for MedMentor
-      prompt
-    }: TranscriptionRequest = requestBody;
-
-    // Security validation
-    if (!audio || typeof audio !== 'string') {
-      throw new Error('Audio este obligatoriu și trebuie să fie un string');
-    }
-
-    if (!conversationId || typeof conversationId !== 'string' || !validateUUID(conversationId)) {
-      throw new Error('ID-ul conversației este invalid');
-    }
-
-    // Validate audio size (base64 size ~= actual size * 1.37)
-    if (audio.length > MAX_AUDIO_SIZE * 1.37) {
-      throw new Error('Fișierul audio este prea mare (max 25MB)');
-    }
-
-    // Validate language for security
-    const validatedLanguage = ALLOWED_LANGUAGES.includes(language) ? language : 'ro';
-
-    // Sanitize prompt if provided
-    const sanitizedPrompt = prompt ? sanitizeInput(prompt) : undefined;
+      language: validatedLanguage,
+      prompt: sanitizedPrompt
+    } = validationResult.data;
 
     console.log(`Processing speech-to-text for conversation: ${conversationId}, language: ${validatedLanguage}`);
 
@@ -126,7 +119,7 @@ serve(async (req) => {
         message_type: 'user',
         timestamp: new Date().toISOString(),
         confidence_score: analysis.confidence,
-        language_detected: language,
+        language_detected: validatedLanguage,
         medical_entities: analysis.medicalEntities,
         voice_metadata: {
           transcription_source: 'whisper-1',
