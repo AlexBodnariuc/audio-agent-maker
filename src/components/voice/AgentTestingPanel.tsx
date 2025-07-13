@@ -223,14 +223,14 @@ export default function AgentTestingPanel({
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: responseData.message,
+        content: responseData.response,
         timestamp: new Date()
       };
 
       setMessages(prev => [...prev, assistantMessage]);
 
       // Convert response to speech
-      await playAIResponse(responseData.message);
+      await playAIResponse(responseData.response);
 
     } catch (error) {
       console.error('Error getting AI response:', error);
