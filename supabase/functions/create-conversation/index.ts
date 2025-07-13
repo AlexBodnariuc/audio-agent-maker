@@ -6,7 +6,7 @@ import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 const requestSchema = z.object({
   specialtyFocus: z.string().default('general'),
   quizSessionId: z.string().uuid().optional(),
-  sessionType: z.enum(['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing']).default('enhanced_voice_learning'),
+  sessionType: z.enum(['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing', 'realtime_voice_test']).default('enhanced_voice_learning'),
 });
 
 const corsHeaders = {

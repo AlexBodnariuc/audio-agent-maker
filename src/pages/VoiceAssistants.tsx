@@ -44,6 +44,7 @@ export default function VoiceAssistants() {
 
   const createTestConversation = async () => {
     try {
+      console.log('Creating test conversation via edge function...');
       const { data, error } = await supabase.functions.invoke('create-conversation', {
         body: {
           specialtyFocus: 'biologie',
@@ -53,16 +54,117 @@ export default function VoiceAssistants() {
       });
 
       if (error) {
-        console.error('Error creating test conversation:', error);
-        return;
+        console.error('Edge function error:', error);
+        toast({
+          title: "Eroare Edge Function",
+          description: `Nu s-a putut crea conversația prin edge function: ${error.message}`,
+          variant: "destructive",
+        });
+        
+        // Fallback: try creating conversation directly via Supabase client
+        console.log('Attempting fallback: creating conversation directly...');
+        return await createConversationFallback();
       }
 
       if (data?.conversationId) {
         setTestConversationId(data.conversationId);
-        console.log('Test conversation created:', data.conversationId);
+        console.log('Test conversation created successfully:', data.conversationId);
+        toast({
+          title: "Succes!",
+          description: "Conversația de test a fost creată cu succes.",
+        });
+      } else {
+        console.error('No conversation ID returned:', data);
+        toast({
+          title: "Eroare",
+          description: "Nu s-a primit ID-ul conversației.",
+          variant: "destructive",
+        });
+        return await createConversationFallback();
       }
     } catch (error) {
       console.error('Error creating test conversation:', error);
+      toast({
+        title: "Eroare de rețea",
+        description: `Eroare la crearea conversației: ${error instanceof Error ? error.message : 'Eroare necunoscută'}`,
+        variant: "destructive",
+      });
+      
+      // Fallback mechanism
+      return await createConversationFallback();
+    }
+  };
+
+  const createConversationFallback = async () => {
+    try {
+      console.log('Creating conversation via fallback method...');
+      
+      // First get an active voice personality
+      const { data: personality, error: personalityError } = await supabase
+        .from('voice_personalities')
+        .select('id')
+        .eq('is_active', true)
+        .limit(1)
+        .single();
+
+      if (personalityError || !personality) {
+        console.error('No active voice personality found:', personalityError);
+        toast({
+          title: "Eroare Configurare",
+          description: "Nu există personalități vocale active configurate.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Create conversation directly
+      const conversationData = {
+        voice_personality_id: personality.id,
+        voice_session_type: 'realtime_voice_test',
+        specialty_focus: 'biologie',
+        quiz_session_id: null,
+        user_id: null,
+        email_session_id: null,
+        status: 'active',
+        title: 'Voice Session - Biologie (Test)',
+        learning_context: {
+          sessionType: 'realtime_voice_test',
+          startTime: new Date().toISOString(),
+          specialtyFocus: 'biologie'
+        }
+      };
+
+      const { data: conversation, error: conversationError } = await supabase
+        .from('conversations')
+        .insert(conversationData)
+        .select()
+        .single();
+
+      if (conversationError) {
+        console.error('Fallback conversation creation failed:', conversationError);
+        toast({
+          title: "Eroare Fallback",
+          description: `Nu s-a putut crea conversația prin fallback: ${conversationError.message}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (conversation?.id) {
+        setTestConversationId(conversation.id);
+        console.log('Fallback conversation created successfully:', conversation.id);
+        toast({
+          title: "Succes (Fallback)!",
+          description: "Conversația de test a fost creată prin metoda de rezervă.",
+        });
+      }
+    } catch (fallbackError) {
+      console.error('Fallback method also failed:', fallbackError);
+      toast({
+        title: "Eroare Critică",
+        description: "Toate metodele de creare a conversației au eșuat. Verifică configurația.",
+        variant: "destructive",
+      });
     }
   };
 
