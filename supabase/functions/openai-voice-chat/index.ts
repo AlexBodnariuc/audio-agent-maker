@@ -309,8 +309,7 @@ async function generateAIResponse(
           temperature: 0.7,
           max_tokens: 500,
           presence_penalty: 0.1,
-          frequency_penalty: 0.1,
-          timeout: 30000 // 30 second timeout
+          frequency_penalty: 0.1
         }),
       });
 
