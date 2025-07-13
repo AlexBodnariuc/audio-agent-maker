@@ -247,7 +247,7 @@ export default function AgentTestingPanel({
   const playAIResponse = async (text: string) => {
     try {
       const { data: audioData, error: audioError } = await supabase.functions.invoke(
-        'openai-voice-chat',
+        'openai-text-to-speech',
         {
           body: {
             text: text,
