@@ -2,3 +2,30 @@ project_id = "ybdvhqmjlztlvrfurkaf"
 
 [functions.create-conversation]
 verify_jwt = false
+
+[functions.elevenlabs-text-to-speech]
+verify_jwt = false
+
+[functions.generate-embeddings]
+verify_jwt = false
+
+[functions.openai-conversation-assistant]
+verify_jwt = false
+
+[functions.openai-realtime-voice]
+verify_jwt = false
+
+[functions.openai-speech-to-text]
+verify_jwt = false
+
+[functions.openai-text-to-speech]
+verify_jwt = false
+
+[functions.openai-voice-chat]
+verify_jwt = false
+
+[functions.semantic-search]
+verify_jwt = false
+
+[functions.voice-analytics]
+verify_jwt = false

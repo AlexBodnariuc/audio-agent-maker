@@ -15,6 +15,7 @@ interface AgentFormData {
   voice: string;
   description: string;
   tools: string[];
+  realtimeVoiceMode: boolean;
 }
 
 interface AgentFormProps {
@@ -50,6 +51,7 @@ export default function AgentForm({ onSubmit, isGenerating }: AgentFormProps) {
     voice: "alloy",
     description: "",
     tools: [],
+    realtimeVoiceMode: false,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -74,6 +76,7 @@ export default function AgentForm({ onSubmit, isGenerating }: AgentFormProps) {
       voice: "fable",
       description: "Create a helpful tutor that teaches Python programming and reads explanations aloud in a friendly female voice",
       tools: ["code_interpreter"],
+      realtimeVoiceMode: false,
     });
   };
 
@@ -185,6 +188,32 @@ export default function AgentForm({ onSubmit, isGenerating }: AgentFormProps) {
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-start space-x-3 p-4 rounded-lg border-2 border-primary/20 bg-primary/5 hover:border-primary/30 transition-colors">
+              <Checkbox
+                id="realtimeVoiceMode"
+                checked={formData.realtimeVoiceMode}
+                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, realtimeVoiceMode: !!checked }))}
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <Bot className="h-4 w-4 text-primary" />
+                  <Label htmlFor="realtimeVoiceMode" className="font-medium text-primary">
+                    Mod Voce Real-Time
+                  </Label>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Activează conversațiile vocale în timp real cu OpenAI pentru interacțiuni mai naturale și rapide
+                </p>
+                {formData.realtimeVoiceMode && (
+                  <div className="mt-2 text-xs text-primary font-medium animate-fade-in">
+                    ✨ Perfect pentru tutoriale medicale interactive în română
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
