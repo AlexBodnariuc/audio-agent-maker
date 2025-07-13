@@ -128,9 +128,12 @@ export default function AgentTestingPanel({
   };
 
   const processAudio = async (audioBlob: Blob) => {
-    if (!conversationId) {
+    let currentConversationId = conversationId;
+    
+    if (!currentConversationId) {
       const newConversationId = await createConversation();
       if (!newConversationId) return;
+      currentConversationId = newConversationId;
     }
 
     setIsProcessing(true);
@@ -145,7 +148,10 @@ export default function AgentTestingPanel({
         const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke(
           'openai-speech-to-text',
           {
-            body: { audio: base64Audio }
+            body: { 
+              audio: base64Audio,
+              conversationId: currentConversationId
+            }
           }
         );
 
