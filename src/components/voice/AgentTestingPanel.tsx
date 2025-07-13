@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { 
   Mic, 
   MicOff, 
@@ -17,7 +18,8 @@ import {
   Sparkles,
   RotateCcw,
   Play,
-  Pause
+  Pause,
+  Settings
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -59,6 +61,8 @@ export default function AgentTestingPanel({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [voiceProvider, setVoiceProvider] = useState<'openai' | 'elevenlabs'>('openai');
+  const [selectedVoice, setSelectedVoice] = useState('alloy');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -264,15 +268,19 @@ export default function AgentTestingPanel({
 
   const playAIResponse = async (text: string) => {
     try {
+      let functionName, requestBody;
+      
+      if (voiceProvider === 'elevenlabs') {
+        functionName = 'elevenlabs-text-to-speech';
+        requestBody = { text, voice_id: selectedVoice };
+      } else {
+        functionName = 'openai-text-to-speech';
+        requestBody = { text, voice: selectedVoice, format: 'mp3' };
+      }
+
       const { data: audioData, error: audioError } = await supabase.functions.invoke(
-        'openai-text-to-speech',
-        {
-          body: {
-            text: text,
-            voice: 'alloy',
-            format: 'mp3'
-          }
-        }
+        functionName,
+        { body: requestBody }
       );
 
       if (audioError) throw audioError;
@@ -320,6 +328,26 @@ export default function AgentTestingPanel({
     setConversationId(null);
     stopAudio();
   };
+
+  const openaiVoices = [
+    { id: 'alloy', name: 'Alloy' },
+    { id: 'echo', name: 'Echo' },
+    { id: 'fable', name: 'Fable' },
+    { id: 'onyx', name: 'Onyx' },
+    { id: 'nova', name: 'Nova' },
+    { id: 'shimmer', name: 'Shimmer' }
+  ];
+
+  const elevenlabsVoices = [
+    { id: 'Xb7hH8MSUJpSbSDYk0k2', name: 'Alice (EN)' },
+    { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam (EN)' },
+    { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah (EN)' },
+    { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold (EN)' },
+    { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh (EN)' },
+    { id: 'CwhRBWXzGAHq8TQ4Fs17', name: 'Roger (EN)' },
+    { id: 'D38z5RcWu1voky8WS1ja', name: 'Fin (EN)' },
+    { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George (EN)' }
+  ];
 
   return (
     <div className="space-y-6">
@@ -370,6 +398,50 @@ export default function AgentTestingPanel({
             <p className="text-sm text-muted-foreground">
               <strong>{agent.name}</strong> - {agent.description}
             </p>
+          </div>
+
+          <Separator />
+
+          {/* Voice Settings */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />
+              <span className="text-sm font-medium">Setări vocale</span>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Provider voce</Label>
+                <Select value={voiceProvider} onValueChange={(value: 'openai' | 'elevenlabs') => {
+                  setVoiceProvider(value);
+                  setSelectedVoice(value === 'openai' ? 'alloy' : 'Xb7hH8MSUJpSbSDYk0k2');
+                }}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="openai">OpenAI</SelectItem>
+                    <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Voce</Label>
+                <Select value={selectedVoice} onValueChange={setSelectedVoice}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(voiceProvider === 'openai' ? openaiVoices : elevenlabsVoices).map((voice) => (
+                      <SelectItem key={voice.id} value={voice.id}>
+                        {voice.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
