@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.5';
@@ -9,7 +10,7 @@ const voiceChatRequestSchema = {
   quizSessionId: { type: 'string', format: 'uuid', optional: true },
   sessionType: { 
     type: 'string', 
-    enum: ['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing', 'realtime_voice_test'],
+    enum: ['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing', 'realtime_voice_test', 'demo_chat'],
     default: 'enhanced_voice_learning' 
   },
 };
@@ -25,7 +26,7 @@ function validateRequest(data: any) {
     throw new Error('Invalid quiz session ID format');
   }
   
-  const allowedTypes = ['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing', 'realtime_voice_test'];
+  const allowedTypes = ['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing', 'realtime_voice_test', 'demo_chat'];
   if (!allowedTypes.includes(result.sessionType)) {
     throw new Error('Invalid session type');
   }
@@ -42,7 +43,8 @@ serve(async (req) => {
     // Get authorization header and validate JWT
     const authHeader = req.headers.get('authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return makeError('UNAUTHORIZED', 401, undefined, 'Missing or invalid authorization header');
+      console.log('No authorization header found, creating anonymous session');
+      // For demo purposes, we'll create an anonymous session
     }
 
     const supabaseClient = createClient(
@@ -50,9 +52,9 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       {
         global: {
-          headers: {
+          headers: authHeader ? {
             Authorization: authHeader
-          }
+          } : {}
         }
       }
     );
@@ -90,16 +92,51 @@ serve(async (req) => {
       return makeError('NOT_FOUND', 404, undefined, 'No active voice personality found');
     }
 
+    // For demo sessions, create a temporary email session to satisfy RLS
+    let emailSessionId = null;
+    let userId = null;
+
+    if (sessionType === 'demo_chat') {
+      // Create a temporary demo session
+      const demoEmail = `demo_${Date.now()}@medmentor.demo`;
+      const { data: demoSession, error: demoError } = await supabaseClient
+        .from('email_sessions')
+        .insert({
+          email: demoEmail,
+          session_token: `demo_${Date.now()}`,
+          is_active: true,
+          email_verified: true
+        })
+        .select('id')
+        .single();
+
+      if (demoError) {
+        console.error('Error creating demo session:', demoError);
+        return makeError('INTERNAL_ERROR', 500, { originalError: demoError.message }, 'Error creating demo session');
+      }
+
+      emailSessionId = demoSession.id;
+      console.log('Created demo email session:', emailSessionId);
+    } else {
+      // Try to get authenticated user
+      if (authHeader) {
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (!userError && user) {
+          userId = user.id;
+        }
+      }
+    }
+
     // Create conversation with proper data structure
     const conversationData = {
       voice_personality_id: personality.id,
       voice_session_type: sessionType || 'enhanced_voice_learning',
       specialty_focus: specialtyFocus || 'general',
-      quiz_session_id: quizSessionId || null, // Explicitly allow null
-      user_id: null, // Allow null user_id for voice sessions
-      email_session_id: null, // Allow null for voice sessions
+      quiz_session_id: quizSessionId || null,
+      user_id: userId,
+      email_session_id: emailSessionId,
       status: 'active',
-      title: `Voice Session - ${specialtyFocus || 'General'}`,
+      title: `${sessionType === 'demo_chat' ? 'Demo ' : ''}Session - ${specialtyFocus || 'General'}`,
       learning_context: {
         sessionType: sessionType || 'enhanced_voice_learning',
         startTime: new Date().toISOString(),
@@ -124,7 +161,8 @@ serve(async (req) => {
 
     return makeSuccess({ 
       conversationId: conversation.id,
-      conversation 
+      conversation,
+      demoMode: sessionType === 'demo_chat'
     });
 
   } catch (error) {

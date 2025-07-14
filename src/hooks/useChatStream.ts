@@ -1,3 +1,4 @@
+
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -78,20 +79,15 @@ export const useChatStream = (): UseChatStreamReturn => {
 
       console.log('Starting chat stream request...');
 
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session) {
-        throw new Error('Nu sunteți autentificat');
-      }
-
-      // Call the streaming Edge Function
+      // For demo purposes, we'll call the edge function without authentication
+      // but pass the conversation_id which contains the demo session
       const response = await fetch(
         `https://ybdvhqmjlztlvrfurkaf.supabase.co/functions/v1/openai-chat-stream`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
+            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InliZHZocW1qbHp0bHZyZnVya2FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwNjE2MTcsImV4cCI6MjA2NDYzNzYxN30.UrS172jVmUo5XEEl0BrevGjwg2pwu0T8Jss3p3gxMrg'
           },
           body: JSON.stringify({
             conversation_id: conversationId,
@@ -102,7 +98,7 @@ export const useChatStream = (): UseChatStreamReturn => {
       );
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error?.message || `HTTP ${response.status}`);
       }
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -50,7 +51,10 @@ const ChatDemo: React.FC = () => {
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error creating demo conversation:', error);
+        throw error;
+      }
 
       if (data?.conversationId) {
         setConversationId(data.conversationId);
@@ -66,7 +70,7 @@ const ChatDemo: React.FC = () => {
       console.error('Error creating demo conversation:', error);
       toast({
         title: "Eroare",
-        description: "Nu s-a putut crea conversația demo. Încercați din nou.",
+        description: `Nu s-a putut crea conversația demo: ${error.message || 'Eroare necunoscută'}`,
         variant: "destructive",
       });
     } finally {
@@ -164,9 +168,14 @@ const ChatDemo: React.FC = () => {
               <Card className="h-[500px] flex items-center justify-center">
                 <CardContent className="text-center">
                   <Bot className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">Se încarcă demo-ul...</h3>
+                  <h3 className="text-lg font-semibold mb-2">
+                    {isLoading ? 'Se încarcă demo-ul...' : 'Demo indisponibil'}
+                  </h3>
                   <p className="text-muted-foreground">
-                    Se creează o conversație demo pentru testare.
+                    {isLoading 
+                      ? 'Se creează o conversație demo pentru testare.' 
+                      : 'Nu s-a putut crea conversația demo. Încearcă să resetezi demo-ul.'
+                    }
                   </p>
                 </CardContent>
               </Card>
