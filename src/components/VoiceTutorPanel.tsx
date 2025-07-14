@@ -32,6 +32,14 @@ interface RealtimeMessage {
   reconnectSuggested?: boolean;
   closeCode?: number;
   closeReason?: string;
+  metrics?: {
+    messagesProcessed: number;
+    errorsCount: number;
+    reconnectCount: number;
+    totalUptime: number;
+  };
+  attempt?: number;
+  maxAttempts?: number;
 }
 
 // Audio utilities for PCM16 processing
@@ -173,11 +181,13 @@ export default function VoiceTutorPanel({
   const [responses, setResponses] = useState<string[]>([]);
   const [sessionStats, setSessionStats] = useState({ questions: 0, correct: 0, xp: 0 });
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
-  const [sessionState, setSessionState] = useState<'disconnected' | 'connecting' | 'configuring' | 'ready' | 'error'>('disconnected');
+  const [sessionState, setSessionState] = useState<'disconnected' | 'connecting' | 'configuring' | 'ready' | 'error' | 'reconnecting'>('disconnected');
   const [canRetry, setCanRetry] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
   const [autoRecordingEnabled, setAutoRecordingEnabled] = useState(false);
+  const [sessionMetrics, setSessionMetrics] = useState({ messagesProcessed: 0, errorsCount: 0, reconnectCount: 0 });
+  const [queueLength, setQueueLength] = useState(0);
   
   const { toast } = useToast();
   const wsRef = useRef<WebSocket | null>(null);
@@ -258,11 +268,29 @@ export default function VoiceTutorPanel({
       wsRef.current.onmessage = async (event) => {
         try {
           const data: RealtimeMessage = JSON.parse(event.data);
-          console.log('Received message:', data.type, 'Session state:', sessionState);
+          console.log('Received message:', data.type, 'Session state:', data.sessionState || sessionState);
+
+          // Update session state and metrics from server
+          if (data.sessionState) {
+            setSessionState(data.sessionState as any);
+          }
+          if (data.queueLength !== undefined) {
+            setQueueLength(data.queueLength);
+          }
+          if (data.metrics) {
+            setSessionMetrics(data.metrics);
+          }
 
           switch (data.type) {
+            case 'client_connected':
+              console.log('Client connected, initializing...');
+              setConnectionStatus('connecting');
+              break;
+
             case 'connection_established':
               console.log('Connection established with OpenAI');
+              setConnectionStatus('connected');
+              setSessionState('configuring');
               break;
 
             case 'session_ready':
@@ -281,17 +309,48 @@ export default function VoiceTutorPanel({
               });
               break;
 
+            case 'session_heartbeat':
+              // Silent heartbeat - just update metrics
+              if (data.metrics) {
+                setSessionMetrics(data.metrics);
+              }
+              break;
+
+            case 'reconnecting':
+              console.log('Server attempting reconnection:', data.attempt, '/', data.maxAttempts);
+              setSessionState('reconnecting');
+              setRetryCount(data.attempt || 0);
+              
+              toast({
+                title: "Reconectare...",
+                description: `Încercarea ${data.attempt}/${data.maxAttempts} de reconectare`,
+              });
+              break;
+
             case 'session_not_ready':
             case 'session_unavailable':
-              console.log('Session not ready:', data.message);
-              setSessionState('configuring');
+              console.log('Session not ready:', data.message, 'Queue length:', data.queueLength);
               
-              if (data.canRetry && retryCount < maxRetries) {
-                setTimeout(() => {
-                  setRetryCount(prev => prev + 1);
-                  console.log(`Retrying session... attempt ${retryCount + 1}`);
-                }, 2000);
+              // Show queue status to user
+              if (data.queueLength > 0) {
+                toast({
+                  title: "Mesaje În Așteptare",
+                  description: `${data.queueLength} mesaje în coadă. Sesiunea se configurează...`,
+                });
               }
+              break;
+
+            case 'max_retries_exceeded':
+              console.error('Maximum retries exceeded');
+              setSessionState('error');
+              setCanRetry(false);
+              setLastError('Numărul maxim de reîncercări a fost atins');
+              
+              toast({
+                title: "Conexiune Eșuată",
+                description: "Nu s-a putut stabili conexiunea după multiple încercări",
+                variant: "destructive",
+              });
               break;
 
             case 'session_error':
@@ -456,6 +515,7 @@ export default function VoiceTutorPanel({
         setIsRecording(false);
         setIsSpeaking(false);
         setAutoRecordingEnabled(false);
+        setQueueLength(0);
         
         if (heartbeatRef.current) {
           clearInterval(heartbeatRef.current);
@@ -466,6 +526,15 @@ export default function VoiceTutorPanel({
         if (recorderRef.current) {
           recorderRef.current.stop();
           recorderRef.current = null;
+        }
+        
+        // Show appropriate message based on close reason
+        if (!event.wasClean && event.code !== 1000) {
+          toast({
+            title: "Conexiune Întreruptă",
+            description: `Sesiunea s-a închis neașteptat (cod: ${event.code})`,
+            variant: "destructive",
+          });
         }
       };
 
