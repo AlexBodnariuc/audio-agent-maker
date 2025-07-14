@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import QuizCard from "@/components/medmentor/QuizCard";
 import StudentDashboard from "@/components/medmentor/StudentDashboard";
 import EnhancedVoiceQuizAssistant from "@/components/medmentor/EnhancedVoiceQuizAssistant";
+import { useAuth } from "@/hooks/useAuth";
 import { 
   GraduationCap, 
   BookOpen, 
@@ -23,7 +24,10 @@ import {
   Heart,
   Clock,
   Globe,
-  Bot
+  Bot,
+  LogOut,
+  LogIn,
+  User
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -96,6 +100,7 @@ export default function Index() {
   const [selectedQuizType, setSelectedQuizType] = useState<"biology" | "chemistry" | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { user, signOut, loading } = useAuth();
 
   const handleStartQuiz = (subject: "biology" | "chemistry") => {
     setSelectedQuizType(subject);
@@ -108,6 +113,22 @@ export default function Index() {
       description: `Ai obținut ${score.toFixed(0)}% și ai câștigat ${xpEarned} XP!`,
     });
     // Could update student stats here
+  };
+
+  const handleSignOut = async () => {
+    const { error } = await signOut();
+    if (error) {
+      toast({
+        title: "Eroare",
+        description: "Nu s-a putut ieși din cont. Încearcă din nou.",
+        variant: "destructive"
+      });
+    } else {
+      toast({
+        title: "Ieșire reușită",
+        description: "Te-ai deconectat cu succes."
+      });
+    }
   };
 
   const features = [
@@ -221,6 +242,46 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-gradient-hero">
+      {/* Navigation Header */}
+      <div className="border-b border-border/50 bg-card/30 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <GraduationCap className="h-6 w-6 text-medical-blue" />
+              <span className="font-bold text-lg">MedMentor</span>
+            </div>
+            <div className="flex items-center gap-4">
+              {user ? (
+                <>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <User className="h-4 w-4" />
+                    <span>{user.email}</span>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleSignOut}
+                    disabled={loading}
+                  >
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Ieși din cont
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => navigate("/auth")}
+                >
+                  <LogIn className="h-4 w-4 mr-2" />
+                  Conectează-te
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Hero Section */}
       <div className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-medical-blue/10 via-transparent to-medical-green/10" />
