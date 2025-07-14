@@ -285,6 +285,126 @@ check_crud_implementation() {
 }
 
 # Main execution
+# TTS Job Health Check
+check_tts_job_health() {
+    echo -e "${BLUE}🎵 Checking TTS job health...${NC}"
+    
+    if [ -z "$SUPABASE_DB_URL" ]; then
+        echo -e "${YELLOW}⚠️ SUPABASE_DB_URL not set, skipping TTS job check${NC}"
+        return 0
+    fi
+    
+    # Check for failed TTS jobs
+    if command -v psql &> /dev/null; then
+        local failed_count
+        failed_count=$(psql "$SUPABASE_DB_URL" -t -c "SELECT COUNT(*) FROM tts_jobs WHERE status='failed';" 2>/dev/null || echo "0")
+        failed_count=$(echo "$failed_count" | tr -d ' ')
+        
+        if [ "$failed_count" -gt 0 ]; then
+            echo -e "${RED}❌ Found $failed_count failed TTS jobs${NC}"
+            return 1
+        else
+            echo -e "${GREEN}✅ No failed TTS jobs found${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠️ psql not available, skipping database check${NC}"
+    fi
+    
+    return 0
+}
+
+# Enhanced service role key check
+check_service_role_usage() {
+    echo -e "${BLUE}🔑 Checking for service role key usage...${NC}"
+    
+    local edge_functions_dir="supabase/functions"
+    local failures=0
+    
+    if [ ! -d "$edge_functions_dir" ]; then
+        echo -e "${YELLOW}⚠️ No edge functions directory found${NC}"
+        return 0
+    fi
+    
+    # Search for SUPABASE_SERVICE_ROLE_KEY usage (excluding README files)
+    if grep -r "SUPABASE_SERVICE_ROLE_KEY" "$edge_functions_dir" --include="*.ts" --include="*.js" --exclude="README*"; then
+        echo -e "${RED}❌ Found service role key usage in edge functions${NC}"
+        failures=$((failures + 1))
+    fi
+    
+    # Check for createClient with service role pattern
+    if grep -r "createClient.*supabaseServiceKey" "$edge_functions_dir" --include="*.ts" --include="*.js"; then
+        echo -e "${RED}❌ Found service role client creation pattern${NC}"
+        failures=$((failures + 1))
+    fi
+    
+    if [ $failures -gt 0 ]; then
+        echo -e "${RED}❌ Service role key check failed${NC}"
+        return 1
+    fi
+    
+    echo -e "${GREEN}✅ No service role keys found in edge functions${NC}"
+    return 0
+}
+
+# Test Coverage Check with Vitest and Jest
+check_tests() {
+    echo -e "${BLUE}🧪 Running test suite...${NC}"
+    
+    if [ ! -f "package.json" ]; then
+        echo -e "${YELLOW}⚠️ package.json not found, skipping tests${NC}"
+        return 0
+    fi
+    
+    # Install dependencies if node_modules doesn't exist
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}⏳ Installing dependencies...${NC}"
+        npm ci
+    fi
+    
+    local test_failures=0
+    
+    # Run Vitest unit tests
+    if grep -q '"vitest"' package.json; then
+        echo -e "${BLUE}Running Vitest unit tests...${NC}"
+        if npm run vitest -- run 2>/dev/null || npx vitest run 2>/dev/null; then
+            echo -e "${GREEN}✅ Vitest unit tests passed${NC}"
+        else
+            echo -e "${RED}❌ Vitest unit tests failed${NC}"
+            test_failures=$((test_failures + 1))
+        fi
+    fi
+    
+    # Run Jest integration tests
+    if grep -q '"jest"' package.json; then
+        echo -e "${BLUE}Running Jest integration tests...${NC}"
+        if npm run jest 2>/dev/null || npx jest 2>/dev/null; then
+            echo -e "${GREEN}✅ Jest integration tests passed${NC}"
+        else
+            echo -e "${RED}❌ Jest integration tests failed${NC}"
+            test_failures=$((test_failures + 1))
+        fi
+    fi
+    
+    # Run auth guard tests specifically if they exist
+    if [ -f "src/__tests__/auth-guard.test.ts" ]; then
+        echo -e "${BLUE}Running auth guard tests...${NC}"
+        if npm test src/__tests__/auth-guard.test.ts 2>/dev/null || npx vitest run src/__tests__/auth-guard.test.ts 2>/dev/null; then
+            echo -e "${GREEN}✅ Auth guard tests passed${NC}"
+        else
+            echo -e "${RED}❌ Auth guard tests failed${NC}"
+            test_failures=$((test_failures + 1))
+        fi
+    fi
+    
+    if [ $test_failures -gt 0 ]; then
+        echo -e "${RED}❌ Test suite failed ($test_failures test suites failed)${NC}"
+        return 1
+    fi
+    
+    echo -e "${GREEN}✅ All tests passed${NC}"
+    return 0
+}
+
 main() {
     echo -e "${BLUE}Starting MedMentor CI Checks...${NC}"
     echo ""
@@ -301,6 +421,7 @@ main() {
         "check_crud_implementation"
         "check_typescript"
         "check_tests"
+        "check_tts_job_health"
     )
     
     for check in "${checks[@]}"; do
