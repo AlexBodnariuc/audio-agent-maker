@@ -95,20 +95,45 @@ serve(async (req) => {
     }
 
     // Verify conversation exists and belongs to user or is a demo
-    let conversationQuery = supabase
-      .from('conversations')
-      .select('id, voice_personality_id')
-      .eq('id', conversation_id);
+    let conversation = null;
+    let convError = null;
 
     if (user_id) {
-      // For authenticated users
-      conversationQuery = conversationQuery.or(`user_id.eq.${user_id},email_session_id.in.(select id from email_sessions where email = '${user_email}')`);
+      // For authenticated users, first get their email sessions
+      const { data: emailSessions } = await supabase
+        .from('email_sessions')
+        .select('id')
+        .eq('email', user_email);
+
+      const emailSessionIds = emailSessions?.map(session => session.id) || [];
+
+      // Now check if conversation belongs to user or their email sessions
+      let conversationQuery = supabase
+        .from('conversations')
+        .select('id, voice_personality_id')
+        .eq('id', conversation_id);
+
+      if (emailSessionIds.length > 0) {
+        conversationQuery = conversationQuery.or(`user_id.eq.${user_id},email_session_id.in.(${emailSessionIds.map(id => `"${id}"`).join(',')})`);
+      } else {
+        conversationQuery = conversationQuery.eq('user_id', user_id);
+      }
+
+      const result = await conversationQuery.single();
+      conversation = result.data;
+      convError = result.error;
     } else {
       // For demo sessions, verify it has a demo email session
-      conversationQuery = conversationQuery.not('email_session_id', 'is', null);
+      const result = await supabase
+        .from('conversations')
+        .select('id, voice_personality_id, email_sessions!inner(email)')
+        .eq('id', conversation_id)
+        .like('email_sessions.email', '%@medmentor.demo')
+        .single();
+      
+      conversation = result.data;
+      convError = result.error;
     }
-
-    const { data: conversation, error: convError } = await conversationQuery.single();
 
     if (convError || !conversation) {
       console.error('Conversation not found:', convError);
