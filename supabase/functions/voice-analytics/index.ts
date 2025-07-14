@@ -7,18 +7,62 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface AnalyticsRequest {
-  conversationId: string;
-  sessionDuration?: number;
-  voiceMetrics?: {
-    pace: number;
-    clarity: number;
-    confidence: number;
-  };
-  learningTopics?: string[];
-  comprehensionIndicators?: any;
-  wordCount?: number;
-  medicalTermsUsed?: string[];
+// Voice analytics validation with strict rules
+function validateVoiceAnalyticsRequest(data: any) {
+  const errors: Array<{ field: string; message: string; code: string }> = [];
+  
+  if (!data.conversationId || typeof data.conversationId !== 'string') {
+    errors.push({ field: 'conversationId', message: 'Conversation ID is required', code: 'invalid_type' });
+  } else if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.conversationId)) {
+    errors.push({ field: 'conversationId', message: 'Invalid conversation ID format', code: 'invalid_uuid' });
+  }
+  
+  if (data.sessionDuration !== undefined) {
+    if (typeof data.sessionDuration !== 'number' || data.sessionDuration <= 0) {
+      errors.push({ field: 'sessionDuration', message: 'Session duration must be greater than 0', code: 'invalid_range' });
+    } else if (data.sessionDuration > 86400) {
+      errors.push({ field: 'sessionDuration', message: 'Session duration cannot exceed 24 hours', code: 'invalid_range' });
+    }
+  }
+  
+  if (data.voiceMetrics !== undefined) {
+    if (typeof data.voiceMetrics !== 'object' || data.voiceMetrics === null) {
+      errors.push({ field: 'voiceMetrics', message: 'Voice metrics must be an object', code: 'invalid_type' });
+    } else {
+      const { pace, clarity, confidence } = data.voiceMetrics;
+      if (pace !== undefined && (typeof pace !== 'number' || pace < 0 || pace > 10)) {
+        errors.push({ field: 'voiceMetrics.pace', message: 'Pace must be between 0-10', code: 'invalid_range' });
+      }
+      if (clarity !== undefined && (typeof clarity !== 'number' || clarity < 0 || clarity > 10)) {
+        errors.push({ field: 'voiceMetrics.clarity', message: 'Clarity must be between 0-10', code: 'invalid_range' });
+      }
+      if (confidence !== undefined && (typeof confidence !== 'number' || confidence < 0 || confidence > 1)) {
+        errors.push({ field: 'voiceMetrics.confidence', message: 'Confidence must be between 0-1', code: 'invalid_range' });
+      }
+    }
+  }
+  
+  if (data.learningTopics !== undefined) {
+    if (!Array.isArray(data.learningTopics)) {
+      errors.push({ field: 'learningTopics', message: 'Learning topics must be an array', code: 'invalid_type' });
+    } else if (data.learningTopics.length > 100) {
+      errors.push({ field: 'learningTopics', message: 'Learning topics cannot exceed 100 items', code: 'too_big' });
+    }
+  }
+  
+  if (data.medicalTermsUsed !== undefined) {
+    if (!Array.isArray(data.medicalTermsUsed)) {
+      errors.push({ field: 'medicalTermsUsed', message: 'Medical terms must be an array', code: 'invalid_type' });
+    } else if (data.medicalTermsUsed.length > 100) {
+      errors.push({ field: 'medicalTermsUsed', message: 'Medical terms cannot exceed 100 items', code: 'too_big' });
+    }
+  }
+  
+  if (data.wordCount !== undefined && (typeof data.wordCount !== 'number' || data.wordCount < 0)) {
+    errors.push({ field: 'wordCount', message: 'Word count cannot be negative', code: 'invalid_range' });
+  }
+  
+  return { errors, data };
 }
 
 serve(async (req) => {
@@ -52,6 +96,21 @@ serve(async (req) => {
       }
     });
 
+    const rawBody = await req.json();
+    const validation = validateVoiceAnalyticsRequest(rawBody);
+    
+    if (validation.errors.length > 0) {
+      return new Response(JSON.stringify({
+        error: 'Validation failed',
+        success: false,
+        issues: validation.errors,
+        timestamp: new Date().toISOString()
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
     const { 
       conversationId, 
       sessionDuration, 
@@ -60,11 +119,7 @@ serve(async (req) => {
       comprehensionIndicators,
       wordCount,
       medicalTermsUsed
-    }: AnalyticsRequest = await req.json();
-
-    if (!conversationId) {
-      throw new Error('conversationId is required');
-    }
+    } = rawBody;
 
     console.log(`Processing voice analytics for conversation ${conversationId}`);
 

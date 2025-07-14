@@ -105,9 +105,9 @@ export function classifyError(error: unknown): StructuredError {
       type: ErrorType.VALIDATION,
       severity: ErrorSeverity.MEDIUM,
       code: ERROR_CODES.INVALID_INPUT,
-      message: error.errors[0]?.message || 'Validation error',
+      message: error.issues[0]?.message || 'Validation error',
       originalError: error as Error,
-      context: { zodErrors: error.errors },
+      context: { zodErrors: error.issues },
       timestamp,
     };
   }

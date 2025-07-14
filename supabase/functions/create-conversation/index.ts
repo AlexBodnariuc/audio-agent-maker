@@ -1,13 +1,36 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.5';
-import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
-const requestSchema = z.object({
-  specialtyFocus: z.string().default('general'),
-  quizSessionId: z.string().uuid().optional(),
-  sessionType: z.enum(['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing', 'realtime_voice_test']).default('enhanced_voice_learning'),
-});
+// Common validation schema
+const voiceChatRequestSchema = {
+  specialtyFocus: { type: 'string', default: 'general' },
+  quizSessionId: { type: 'string', format: 'uuid', optional: true },
+  sessionType: { 
+    type: 'string', 
+    enum: ['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing', 'realtime_voice_test'],
+    default: 'enhanced_voice_learning' 
+  },
+};
+
+function validateRequest(data: any) {
+  const result = {
+    specialtyFocus: data.specialtyFocus || 'general',
+    quizSessionId: data.quizSessionId || undefined,
+    sessionType: data.sessionType || 'enhanced_voice_learning'
+  };
+  
+  if (result.quizSessionId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.quizSessionId)) {
+    throw new Error('Invalid quiz session ID format');
+  }
+  
+  const allowedTypes = ['general', 'enhanced_voice_learning', 'learning', 'quiz_assistance', 'testing', 'realtime_voice_test'];
+  if (!allowedTypes.includes(result.sessionType)) {
+    throw new Error('Invalid session type');
+  }
+  
+  return result;
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -43,11 +66,7 @@ serve(async (req) => {
     );
 
     const rawBody = await req.json();
-    const validationResult = requestSchema.safeParse(rawBody);
-    if (!validationResult.success) {
-      throw new Error('Invalid request parameters');
-    }
-    const { specialtyFocus, quizSessionId, sessionType } = validationResult.data;
+    const { specialtyFocus, quizSessionId, sessionType } = validateRequest(rawBody);
 
     console.log('Creating conversation with:', { specialtyFocus, quizSessionId, sessionType });
 
