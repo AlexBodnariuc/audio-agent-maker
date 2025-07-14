@@ -79,16 +79,23 @@ export const useChatStream = (): UseChatStreamReturn => {
 
       console.log('Starting chat stream request...');
 
-      // For demo purposes, we'll call the edge function without authentication
-      // but pass the conversation_id which contains the demo session
+      // Get current session for authentication
+      const session = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InliZHZocW1qbHp0bHZyZnVya2FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwNjE2MTcsImV4cCI6MjA2NDYzNzYxN30.UrS172jVmUo5XEEl0BrevGjwg2pwu0T8Jss3p3gxMrg'
+      };
+
+      // Add authorization header if we have a session
+      if (session.data.session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.data.session.access_token}`;
+      }
+
       const response = await fetch(
-        `https://ybdvhqmjlztlvrfurkaf.supabase.co/functions/v1/openai-chat-stream`,
+        'https://ybdvhqmjlztlvrfurkaf.supabase.co/functions/v1/openai-chat-stream',
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InliZHZocW1qbHp0bHZyZnVya2FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwNjE2MTcsImV4cCI6MjA2NDYzNzYxN30.UrS172jVmUo5XEEl0BrevGjwg2pwu0T8Jss3p3gxMrg'
-          },
+          headers,
           body: JSON.stringify({
             conversation_id: conversationId,
             text: text
