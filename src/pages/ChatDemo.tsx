@@ -56,15 +56,18 @@ const ChatDemo: React.FC = () => {
         throw error;
       }
 
-      if (data?.conversationId) {
-        setConversationId(data.conversationId);
+      console.log('Response from create-conversation:', data);
+      
+      if (data?.success && data?.data?.conversationId) {
+        setConversationId(data.data.conversationId);
         setIsDemoActive(true);
         toast({
           title: "Demo Chat Activat",
           description: "Conversația demo a fost creată cu succes!",
         });
       } else {
-        throw new Error("Nu s-a primit ID-ul conversației");
+        const errorMsg = data?.error || "Nu s-a primit ID-ul conversației";
+        throw new Error(errorMsg);
       }
     } catch (error) {
       console.error('Error creating demo conversation:', error);
