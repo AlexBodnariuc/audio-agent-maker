@@ -1,34 +1,37 @@
 project_id = "ybdvhqmjlztlvrfurkaf"
 
 [functions.create-voice-agent]
-verify_jwt = false
+verify_jwt = true
 
 [functions.create-conversation]
-verify_jwt = false
+verify_jwt = true
 
 [functions.elevenlabs-text-to-speech]
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-embeddings]
-verify_jwt = false
+verify_jwt = true
 
 [functions.openai-conversation-assistant]
-verify_jwt = false
+verify_jwt = true
 
 [functions.openai-realtime-voice]
-verify_jwt = false
+verify_jwt = true
 
 [functions.openai-speech-to-text]
-verify_jwt = false
+verify_jwt = true
 
 [functions.openai-text-to-speech]
-verify_jwt = false
+verify_jwt = true
 
 [functions.openai-voice-chat]
-verify_jwt = false
+verify_jwt = true
 
 [functions.semantic-search]
-verify_jwt = false
+verify_jwt = true
 
 [functions.voice-analytics]
-verify_jwt = false
+verify_jwt = true
+
+[functions.manage-voice-agents]
+verify_jwt = true

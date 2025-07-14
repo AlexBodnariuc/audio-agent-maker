@@ -11,6 +11,7 @@ import VoiceAgentCard from "@/components/voice/VoiceAgentCard";
 import CreateAgentDialog from "@/components/voice/CreateAgentDialog";
 import AgentTestingPanel from "@/components/voice/AgentTestingPanel";
 import VoiceTutorPanel from "@/components/VoiceTutorPanel";
+import VoiceAgentManagement from "@/components/voice/VoiceAgentManagement";
 import { ROMANIAN_TRANSLATIONS } from "@/components/medmentor/RomanianUI";
 
 interface VoicePersonality {
@@ -22,6 +23,7 @@ interface VoicePersonality {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  user_id?: string;
 }
 
 export default function VoiceAssistants() {
@@ -468,39 +470,18 @@ export default function VoiceAssistants() {
           </TabsContent>
 
           <TabsContent value="manage" className="space-y-6">
-            {personalities.length === 0 ? (
-              <Card className="text-center py-12">
-                <CardContent>
-                  <Bot className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">
-                    Niciun asistent vocal găsit
-                  </h3>
-                  <p className="text-muted-foreground mb-4">
-                    Creează primul tău asistent vocal pentru a începe
-                  </p>
-                  <Button 
-                    onClick={() => setShowCreateDialog(true)}
-                    className="bg-medical-blue hover:bg-medical-blue/90"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Creează Primul Asistent
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {personalities.map((personality) => (
-                  <VoiceAgentCard
-                    key={personality.id}
-                    agent={personality}
-                    onSelect={handleAgentSelect}
-                    onUpdate={handleAgentUpdate}
-                    onDelete={handleAgentDelete}
-                    isSelected={selectedAgent?.id === personality.id}
-                  />
-                ))}
-              </div>
-            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {personalities.map((personality) => (
+                <VoiceAgentCard
+                  key={personality.id}
+                  agent={personality}
+                  onSelect={handleAgentSelect}
+                  onUpdate={handleAgentUpdate}
+                  onDelete={handleAgentDelete}
+                  isSelected={selectedAgent?.id === personality.id}
+                />
+              ))}
+            </div>
           </TabsContent>
 
           <TabsContent value="test" className="space-y-6">

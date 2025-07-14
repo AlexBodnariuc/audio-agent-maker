@@ -153,6 +153,112 @@ export const createVoiceAgentRequestSchema = z.object({
 
 export type CreateVoiceAgentRequest = z.infer<typeof createVoiceAgentRequestSchema>;
 
+// Voice agent update request validation (for PATCH operations)
+export const updateVoiceAgentRequestSchema = z.object({
+  name: z
+    .string()
+    .min(1, 'Numele este obligatoriu')
+    .max(100, 'Numele nu poate avea mai mult de 100 de caractere')
+    .transform((val) => val.trim())
+    .optional(),
+  description: z
+    .string()
+    .max(500, 'Descrierea nu poate avea mai mult de 500 de caractere')
+    .transform((val) => val?.trim())
+    .optional(),
+  medical_specialty: z
+    .string()
+    .transform((val) => {
+      if (!val) return null;
+      const normalized = val.toLowerCase().trim();
+      return ROMANIAN_MEDICAL_SPECIALTIES.includes(normalized as any) 
+        ? normalized 
+        : null;
+    })
+    .optional(),
+  persona_json: z
+    .object({
+      personality: z.string().optional(),
+      communication_style: z.string().optional(),
+      expertise_level: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
+      preferred_language: z.enum(['ro', 'en']).optional(),
+      teaching_approach: z.string().optional(),
+    })
+    .optional(),
+  tts_voice_id: z
+    .string()
+    .refine((val) => !val || ALLOWED_VOICES.includes(val as any), 'Vocea selectată este invalidă')
+    .optional(),
+  limits_json: z
+    .object({
+      max_daily_conversations: z.number().int().positive().optional(),
+      max_conversation_length: z.number().int().positive().optional(),
+      allowed_topics: z.array(z.string()).optional(),
+      restricted_topics: z.array(z.string()).optional(),
+    })
+    .optional(),
+  is_active: z.boolean().optional(),
+});
+
+export type UpdateVoiceAgentRequest = z.infer<typeof updateVoiceAgentRequestSchema>;
+
+// Voice agents list request validation
+export const listVoiceAgentsRequestSchema = z.object({
+  page: z.number().int().positive().default(1),
+  limit: z.number().int().positive().max(50).default(10),
+  search: z.string().optional(),
+  specialty: z
+    .string()
+    .optional()
+    .transform((val) => {
+      if (!val) return undefined;
+      const normalized = val.toLowerCase().trim();
+      return ROMANIAN_MEDICAL_SPECIALTIES.includes(normalized as any) 
+        ? normalized 
+        : undefined;
+    }),
+});
+
+export type ListVoiceAgentsRequest = z.infer<typeof listVoiceAgentsRequestSchema>;
+
+// Pagination response schema
+export const paginationSchema = z.object({
+  page: z.number().int().positive(),
+  limit: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  totalPages: z.number().int().nonnegative(),
+  hasNext: z.boolean(),
+  hasPrev: z.boolean(),
+});
+
+export type PaginationInfo = z.infer<typeof paginationSchema>;
+
+// Voice agent response schemas
+export const voiceAgentSchema = z.object({
+  id: z.string().uuid(),
+  agent_id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  medical_specialty: z.string().nullable(),
+  persona_json: z.record(z.string(), z.any()).nullable(),
+  tts_voice_id: z.string().nullable(),
+  limits_json: z.record(z.string(), z.any()).nullable(),
+  user_id: z.string().uuid(),
+  is_active: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export type VoiceAgent = z.infer<typeof voiceAgentSchema>;
+
+export const listVoiceAgentsResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(voiceAgentSchema),
+  pagination: paginationSchema,
+});
+
+export type ListVoiceAgentsResponse = z.infer<typeof listVoiceAgentsResponseSchema>;
+
 // Medical content validation
 export function validateMedicalEducationContent(text: string): boolean {
   // Ensure content is appropriate for high school medical education
