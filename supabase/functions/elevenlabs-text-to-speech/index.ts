@@ -1,4 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,84 +9,124 @@ const corsHeaders = {
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response(null, { headers: corsHeaders })
   }
 
   try {
-    const { text, voice_id = 'Xb7hH8MSUJpSbSDYk0k2' } = await req.json()
-
+    const { text, voice_id = 'pNInz6obpgDQGcFmaJgB', model = 'eleven_multilingual_v2' } = await req.json()
+    
     if (!text) {
       throw new Error('Text is required')
     }
 
-    const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY')
-    if (!ELEVENLABS_API_KEY) {
-      console.error('Missing ELEVENLABS_API_KEY');
-      return new Response(JSON.stringify({
-        error: 'ElevenLabs API key not configured',
-        success: false
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    // Initialize Supabase client
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    )
+
+    // Get user context from JWT
+    const authHeader = req.headers.get('Authorization')
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '')
+      const { data: { user } } = await supabase.auth.getUser(token)
+      
+      if (user) {
+        supabase.auth.setSession({
+          access_token: token,
+          refresh_token: '',
+        })
+      }
     }
 
-    console.log(`Generating speech with ElevenLabs for voice: ${voice_id}`)
+    console.log('Enqueueing TTS job for text:', text.substring(0, 50) + '...')
 
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice_id}`, {
-      method: 'POST',
-      headers: {
-        'Accept': 'audio/mpeg',
-        'Content-Type': 'application/json',
-        'xi-api-key': ELEVENLABS_API_KEY,
-      },
-      body: JSON.stringify({
-        text: text,
-        model_id: 'eleven_multilingual_v2',
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.5
-        }
-      }),
+    // Enqueue TTS job
+    const { data: jobId, error: enqueueError } = await supabase.rpc('enqueue_tts_job', {
+      p_text: text,
+      p_voice_id: voice_id,
+      p_model: model,
+      p_user_id: null, // Will be filled by trigger if authenticated
+      p_email_session_id: null,
+      p_conversation_id: null,
+      p_message_id: null,
+      p_priority: 5,
     })
 
-    if (!response.ok) {
-      const error = await response.text()
-      console.error('ElevenLabs API error:', error)
-      throw new Error(`ElevenLabs API error: ${response.status} - ${error}`)
+    if (enqueueError) {
+      console.error('Error enqueueing TTS job:', enqueueError)
+      throw enqueueError
     }
 
-    // Convert audio buffer to base64
-    const arrayBuffer = await response.arrayBuffer()
-    const base64Audio = btoa(
-      String.fromCharCode(...new Uint8Array(arrayBuffer))
-    )
+    console.log('TTS job enqueued with ID:', jobId)
+
+    // Poll for job completion (with timeout)
+    const maxAttempts = 30 // 30 seconds max
+    let attempts = 0
+    let jobResult = null
+
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 1000)) // Wait 1 second
+      attempts++
+
+      const { data: statusData, error: statusError } = await supabase.rpc('get_tts_job_status', {
+        p_job_id: jobId,
+      })
+
+      if (statusError) {
+        console.error('Error checking job status:', statusError)
+        continue
+      }
+
+      if (statusData && statusData.length > 0) {
+        const status = statusData[0]
+        
+        if (status.status === 'completed' && status.audio_url) {
+          jobResult = {
+            job_id: jobId,
+            audio_url: status.audio_url,
+            status: 'completed',
+          }
+          break
+        } else if (status.status === 'failed') {
+          throw new Error(`TTS job failed: ${status.error_message}`)
+        }
+      }
+
+      console.log(`Waiting for TTS job completion... attempt ${attempts}/${maxAttempts}`)
+    }
+
+    if (!jobResult) {
+      // Job is still processing, return job ID for client to poll
+      return new Response(
+        JSON.stringify({
+          job_id: jobId,
+          status: 'processing',
+          message: 'TTS job is being processed. Use job_id to check status.',
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     return new Response(
-      JSON.stringify({ 
-        success: true,
-        audioContent: base64Audio,
-        metadata: {
-          voice_id: voice_id,
-          model: 'eleven_multilingual_v2'
-        }
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
+      JSON.stringify(jobResult),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
+
   } catch (error) {
-    console.error('Error in elevenlabs-text-to-speech function:', error)
+    console.error('ElevenLabs TTS error:', error)
     return new Response(
-      JSON.stringify({ 
-        error: error.message,
-        success: false,
-        timestamp: new Date().toISOString()
-      }),
+      JSON.stringify({ error: error.message }),
       {
-        status: 400,
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
+      }
     )
   }
 })

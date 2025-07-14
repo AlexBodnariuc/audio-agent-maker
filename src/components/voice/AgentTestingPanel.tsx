@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -25,6 +24,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { SecurityValidator, SECURITY_MESSAGES } from "@/lib/security";
 import type { VoiceAgent } from "@/lib/validation";
+import { useConversation } from "@/hooks/useConversation";
+import { AudioBubble } from "@/components/voice/AudioBubble";
 
 interface AgentTestingPanelProps {
   agent: VoiceAgent;
@@ -32,67 +33,23 @@ interface AgentTestingPanelProps {
   onAgentChange: (agent: VoiceAgent) => void;
 }
 
-interface Message {
-  id: string;
-  type: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  audioUrl?: string;
-}
-
 export default function AgentTestingPanel({ 
   agent, 
   personalities, 
   onAgentChange 
 }: AgentTestingPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
   const [textInput, setTextInput] = useState("");
   const [isListening, setIsListening] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [voiceProvider, setVoiceProvider] = useState<'openai' | 'elevenlabs'>('openai');
-  const [selectedVoice, setSelectedVoice] = useState('alloy');
+  const [voiceProvider, setVoiceProvider] = useState<'openai' | 'elevenlabs'>('elevenlabs');
+  const [selectedVoice, setSelectedVoice] = useState('pNInz6obpgDQGcFmaJgB');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
-
-  const createConversation = useCallback(async () => {
-    try {
-      console.log('Creating conversation for agent:', agent.id);
-      
-      // Use the create-conversation edge function for better reliability
-      const { data: conversationData, error: createError } = await supabase.functions.invoke(
-        'create-conversation',
-        {
-          body: {
-            specialtyFocus: agent.medical_specialty || 'general',
-            sessionType: 'testing'
-          }
-        }
-      );
-
-      if (createError) {
-        console.error('Create conversation error:', createError);
-        throw new Error(createError.message || 'Failed to create conversation');
-      }
-
-      const conversationId = conversationData.conversationId;
-      console.log('Successfully created conversation:', conversationId);
-      
-      setConversationId(conversationId);
-      return conversationId;
-    } catch (error) {
-      console.error('Error creating conversation:', error);
-      toast({
-        title: "Eroare",
-        description: `Nu am putut începe conversația: ${error.message}`,
-        variant: "destructive",
-      });
-      return null;
-    }
-  }, [agent.id, agent.medical_specialty, agent.name, toast]);
+  
+  // Use the new conversation hook
+  const { messages, isLoading, error, sendMessage, clearConversation } = useConversation();
 
   const startListening = async () => {
     try {
@@ -131,21 +88,6 @@ export default function AgentTestingPanel({
   };
 
   const processAudio = async (audioBlob: Blob) => {
-    let currentConversationId = conversationId;
-    
-    if (!currentConversationId) {
-      console.log('No conversation ID, creating new conversation...');
-      const newConversationId = await createConversation();
-      if (!newConversationId) {
-        console.error('Failed to create conversation for audio processing');
-        return;
-      }
-      currentConversationId = newConversationId;
-    }
-
-    console.log('Processing audio for conversation:', currentConversationId);
-    setIsProcessing(true);
-    
     try {
       // Convert audio to base64
       const reader = new FileReader();
@@ -153,15 +95,13 @@ export default function AgentTestingPanel({
       reader.onload = async () => {
         try {
           const base64Audio = (reader.result as string).split(',')[1];
-          console.log('Calling speech-to-text with conversation ID:', currentConversationId);
           
-          // Call speech-to-text with proper structure
+          // Call speech-to-text
           const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke(
             'openai-speech-to-text',
             {
               body: { 
                 audio: base64Audio,
-                conversationId: currentConversationId || '',
                 language: 'ro'
               }
             }
@@ -169,34 +109,17 @@ export default function AgentTestingPanel({
 
           if (transcriptionError) {
             console.error('Transcription error:', transcriptionError);
-            const errorMsg = transcriptionError.message || 'Speech-to-text failed';
-            if (errorMsg.includes('API key')) {
-              throw new Error('Cheile API nu sunt configurate corect. Verifică configurația.');
-            }
-            throw new Error(errorMsg);
+            throw new Error(transcriptionError.message || 'Speech-to-text failed');
           }
 
-          if (!transcriptionData?.success) {
-            console.error('Transcription failed:', transcriptionData);
-            throw new Error(transcriptionData?.error || 'Speech-to-text service failed');
-          }
-
-          if (!transcriptionData?.text) {
-            console.error('No transcription text:', transcriptionData);
+          if (!transcriptionData?.success || !transcriptionData?.text) {
             throw new Error('Nu s-a primit text de la serviciul de recunoaștere vocală');
           }
 
           console.log('Transcription successful:', transcriptionData.text);
-
-          const userMessage: Message = {
-            id: Date.now().toString(),
-            type: 'user',
-            content: transcriptionData.text,
-            timestamp: new Date()
-          };
-
-          setMessages(prev => [...prev, userMessage]);
-          await getAIResponse(transcriptionData.text);
+          
+          // Send the transcribed message using the conversation hook
+          await sendMessage(transcriptionData.text, true);
         } catch (readerError) {
           console.error('Error in audio processing reader:', readerError);
           throw readerError;
@@ -213,8 +136,6 @@ export default function AgentTestingPanel({
         description: `Nu am putut procesa audio-ul: ${error.message}`,
         variant: "destructive",
       });
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -241,186 +162,8 @@ export default function AgentTestingPanel({
       return;
     }
 
-    if (!conversationId) {
-      const newConversationId = await createConversation();
-      if (!newConversationId) return;
-    }
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      type: 'user',
-      content: sanitizedInput,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
     setTextInput("");
-    await getAIResponse(userMessage.content);
-  };
-
-  const getAIResponse = async (userText: string) => {
-    console.log('Getting AI response for conversation:', conversationId);
-    setIsProcessing(true);
-    
-    try {
-      if (!conversationId) {
-        throw new Error('No conversation ID available');
-      }
-
-      console.log('Calling voice-chat with:', {
-        conversationId,
-        message: userText,
-        specialtyFocus: agent.medical_specialty
-      });
-
-      const { data: responseData, error: responseError } = await supabase.functions.invoke(
-        'openai-voice-chat',
-        {
-          body: {
-            conversationId: conversationId,
-            message: userText,
-            specialtyFocus: agent.medical_specialty || 'general',
-            useVoice: true,
-            voice: selectedVoice || 'alloy'
-          }
-        }
-      );
-
-      if (responseError) {
-        console.error('Voice chat error:', responseError);
-        throw new Error(responseError.message || 'Voice chat function failed');
-      }
-
-      if (!responseData?.response) {
-        throw new Error('No response received from AI');
-      }
-
-      console.log('AI response received:', responseData.response);
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: responseData.response,
-        timestamp: new Date()
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
-
-      // Convert response to speech if audio content is available
-      if (responseData.audioContent) {
-        console.log('Playing audio response from voice-chat function');
-        try {
-          const audioBlob = new Blob([
-            Uint8Array.from(atob(responseData.audioContent), c => c.charCodeAt(0))
-          ], { type: 'audio/mp3' });
-          
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-          currentAudioRef.current = audio;
-
-          audio.onplay = () => setIsPlaying(true);
-          audio.onended = () => {
-            setIsPlaying(false);
-            URL.revokeObjectURL(audioUrl);
-          };
-          audio.onerror = () => {
-            setIsPlaying(false);
-            URL.revokeObjectURL(audioUrl);
-          };
-
-          await audio.play();
-        } catch (audioError) {
-          console.error('Error playing audio from response:', audioError);
-          // Fallback to text-to-speech
-          await playAIResponse(responseData.response);
-        }
-      } else {
-        // Convert response to speech using separate TTS
-        await playAIResponse(responseData.response);
-      }
-
-    } catch (error) {
-      console.error('Error getting AI response:', error);
-      toast({
-        title: "Eroare",
-        description: `Nu am putut obține răspunsul AI: ${error.message}`,
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const playAIResponse = async (text: string) => {
-    try {
-      let functionName, requestBody;
-      
-      if (voiceProvider === 'elevenlabs') {
-        functionName = 'elevenlabs-text-to-speech';
-        requestBody = { text, voice_id: selectedVoice };
-      } else {
-        functionName = 'openai-text-to-speech';
-        requestBody = { text, voice: selectedVoice, format: 'mp3' };
-      }
-
-      console.log(`Calling ${functionName} with:`, requestBody);
-
-      const { data: audioData, error: audioError } = await supabase.functions.invoke(
-        functionName,
-        { body: requestBody }
-      );
-
-      if (audioError) {
-        console.error('Audio generation error:', audioError);
-        const errorMsg = audioError.message || 'Audio generation failed';
-        if (errorMsg.includes('API key')) {
-          throw new Error('Cheile API nu sunt configurate corect. Verifică configurația.');
-        }
-        throw audioError;
-      }
-
-      if (!audioData?.success) {
-        console.error('Audio generation failed:', audioData);
-        throw new Error(audioData?.error || 'Text-to-speech service failed');
-      }
-
-      if (!audioData?.audioContent) {
-        console.error('No audio content received:', audioData);
-        throw new Error('Nu s-a primit conținut audio de la serviciu');
-      }
-
-      console.log('Audio generated successfully, playing...');
-
-      // Create audio element and play
-      const audioBlob = new Blob([
-        Uint8Array.from(atob(audioData.audioContent), c => c.charCodeAt(0))
-      ], { type: 'audio/mp3' });
-      
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      currentAudioRef.current = audio;
-
-      audio.onplay = () => setIsPlaying(true);
-      audio.onended = () => {
-        setIsPlaying(false);
-        URL.revokeObjectURL(audioUrl);
-      };
-      audio.onerror = (e) => {
-        console.error('Audio playback error:', e);
-        setIsPlaying(false);
-        URL.revokeObjectURL(audioUrl);
-        throw new Error('Eroare la redarea audio-ului');
-      };
-
-      await audio.play();
-    } catch (error) {
-      console.error('Error playing audio:', error);
-      toast({
-        title: "Eroare Audio",
-        description: error.message || "Nu am putut reda audio-ul",
-        variant: "destructive",
-      });
-    }
+    await sendMessage(sanitizedInput, true);
   };
 
   const stopAudio = () => {
@@ -431,11 +174,10 @@ export default function AgentTestingPanel({
     }
   };
 
-  const clearConversation = () => {
-    setMessages([]);
-    setConversationId(null);
+  const handleClearConversation = useCallback(() => {
+    clearConversation();
     stopAudio();
-  };
+  }, [clearConversation]);
 
   const openaiVoices = [
     { id: 'alloy', name: 'Alloy' },
@@ -463,7 +205,7 @@ export default function AgentTestingPanel({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Bot className="h-5 w-5 text-medical-blue" />
+            <Bot className="h-5 w-5 text-primary" />
             Test Asistent Vocal
           </CardTitle>
         </CardHeader>
@@ -494,7 +236,7 @@ export default function AgentTestingPanel({
             </div>
             <Button
               variant="outline"
-              onClick={clearConversation}
+              onClick={handleClearConversation}
               size="sm"
             >
               <RotateCcw className="h-4 w-4 mr-2" />
@@ -522,7 +264,7 @@ export default function AgentTestingPanel({
                 <Label>Provider voce</Label>
                 <Select value={voiceProvider} onValueChange={(value: 'openai' | 'elevenlabs') => {
                   setVoiceProvider(value);
-                  setSelectedVoice(value === 'openai' ? 'alloy' : 'Xb7hH8MSUJpSbSDYk0k2');
+                  setSelectedVoice(value === 'openai' ? 'alloy' : 'pNInz6obpgDQGcFmaJgB');
                 }}>
                   <SelectTrigger>
                     <SelectValue />
@@ -558,6 +300,11 @@ export default function AgentTestingPanel({
       <Card className="flex-1">
         <CardHeader>
           <CardTitle>Conversație</CardTitle>
+          {error && (
+            <div className="text-sm text-destructive bg-destructive/10 p-2 rounded">
+              Eroare: {error}
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Messages */}
@@ -569,35 +316,44 @@ export default function AgentTestingPanel({
               </div>
             ) : (
               messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex gap-3 ${
-                    message.type === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  <div
-                    className={`max-w-[80%] p-3 rounded-lg ${
-                      message.type === 'user'
-                        ? 'bg-medical-blue text-white'
-                        : 'bg-card border'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      {message.type === 'user' ? (
-                        <User className="h-4 w-4" />
-                      ) : (
-                        <Bot className="h-4 w-4" />
-                      )}
-                      <span className="text-xs opacity-75">
-                        {message.timestamp.toLocaleTimeString()}
-                      </span>
+                <div key={message.id}>
+                  {message.audio_url ? (
+                    <AudioBubble
+                      audioUrl={message.audio_url}
+                      content={message.content}
+                      isUser={message.message_type === 'user'}
+                    />
+                  ) : (
+                    <div
+                      className={`flex gap-3 ${
+                        message.message_type === 'user' ? 'justify-end' : 'justify-start'
+                      }`}
+                    >
+                      <div
+                        className={`max-w-[80%] p-3 rounded-lg ${
+                          message.message_type === 'user'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card border'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          {message.message_type === 'user' ? (
+                            <User className="h-4 w-4" />
+                          ) : (
+                            <Bot className="h-4 w-4" />
+                          )}
+                          <span className="text-xs opacity-75">
+                            {new Date(message.created_at).toLocaleTimeString()}
+                          </span>
+                        </div>
+                        <p className="text-sm">{message.content}</p>
+                      </div>
                     </div>
-                    <p className="text-sm">{message.content}</p>
-                  </div>
+                  )}
                 </div>
               ))
             )}
-            {isProcessing && (
+            {isLoading && (
               <div className="flex justify-start">
                 <div className="bg-card border p-3 rounded-lg max-w-[80%]">
                   <div className="flex items-center gap-2">
@@ -617,7 +373,7 @@ export default function AgentTestingPanel({
                 onMouseDown={startListening}
                 onMouseUp={stopListening}
                 onMouseLeave={stopListening}
-                disabled={isProcessing}
+                disabled={isLoading}
                 variant={isListening ? "destructive" : "outline"}
                 className="flex-1"
               >
@@ -655,11 +411,11 @@ export default function AgentTestingPanel({
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendTextMessage()}
-                disabled={isProcessing}
+                disabled={isLoading}
               />
               <Button
                 onClick={sendTextMessage}
-                disabled={!textInput.trim() || isProcessing}
+                disabled={!textInput.trim() || isLoading}
                 size="icon"
               >
                 <Send className="h-4 w-4" />

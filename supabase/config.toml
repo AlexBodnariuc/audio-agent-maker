@@ -35,3 +35,6 @@ verify_jwt = true
 
 [functions.manage-voice-agents]
 verify_jwt = true
+
+[functions.tts-worker]
+verify_jwt = false
