@@ -1139,6 +1139,69 @@ export type Database = {
         }
         Relationships: []
       }
+      tts_jobs: {
+        Row: {
+          audio_url: string | null
+          completed_at: string | null
+          conversation_id: string | null
+          created_at: string
+          email_session_id: string | null
+          error_message: string | null
+          id: string
+          max_retries: number
+          message_id: string | null
+          model: string
+          priority: number
+          processing_started_at: string | null
+          retry_count: number
+          status: string
+          text: string
+          updated_at: string
+          user_id: string | null
+          voice_id: string
+        }
+        Insert: {
+          audio_url?: string | null
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          email_session_id?: string | null
+          error_message?: string | null
+          id?: string
+          max_retries?: number
+          message_id?: string | null
+          model?: string
+          priority?: number
+          processing_started_at?: string | null
+          retry_count?: number
+          status?: string
+          text: string
+          updated_at?: string
+          user_id?: string | null
+          voice_id?: string
+        }
+        Update: {
+          audio_url?: string | null
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          email_session_id?: string | null
+          error_message?: string | null
+          id?: string
+          max_retries?: number
+          message_id?: string | null
+          model?: string
+          priority?: number
+          processing_started_at?: string | null
+          retry_count?: number
+          status?: string
+          text?: string
+          updated_at?: string
+          user_id?: string | null
+          voice_id?: string
+        }
+        Relationships: []
+      }
       user_achievements: {
         Row: {
           achievement_id: string | null
@@ -1567,9 +1630,55 @@ export type Database = {
         Args: { "": string } | { "": unknown }
         Returns: unknown
       }
+      complete_tts_job: {
+        Args: { p_job_id: string; p_audio_url: string }
+        Returns: boolean
+      }
       create_email_account: {
         Args: { input_email: string; input_password: string }
         Returns: Json
+      }
+      enqueue_tts_job: {
+        Args: {
+          p_text: string
+          p_voice_id?: string
+          p_model?: string
+          p_user_id?: string
+          p_email_session_id?: string
+          p_conversation_id?: string
+          p_message_id?: string
+          p_priority?: number
+        }
+        Returns: string
+      }
+      fail_tts_job: {
+        Args: { p_job_id: string; p_error_message: string }
+        Returns: boolean
+      }
+      get_next_tts_job: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          text: string
+          voice_id: string
+          model: string
+          user_id: string
+          email_session_id: string
+          conversation_id: string
+          message_id: string
+          retry_count: number
+        }[]
+      }
+      get_tts_job_status: {
+        Args: { p_job_id: string }
+        Returns: {
+          id: string
+          status: string
+          audio_url: string
+          error_message: string
+          created_at: string
+          completed_at: string
+        }[]
       }
       gtrgm_compress: {
         Args: { "": unknown }
