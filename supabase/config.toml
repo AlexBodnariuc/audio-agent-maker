@@ -1,5 +1,8 @@
 project_id = "ybdvhqmjlztlvrfurkaf"
 
+[functions.openai-chat-stream]
+verify_jwt = true
+
 [functions.create-voice-agent]
 verify_jwt = true
 
