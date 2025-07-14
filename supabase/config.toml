@@ -1,5 +1,8 @@
 project_id = "ybdvhqmjlztlvrfurkaf"
 
+[functions.create-voice-agent]
+verify_jwt = false
+
 [functions.create-conversation]
 verify_jwt = false
 

@@ -1467,9 +1467,13 @@ export type Database = {
           description: string | null
           id: string
           is_active: boolean
+          limits_json: Json | null
           medical_specialty: string | null
           name: string
+          persona_json: Json | null
+          tts_voice_id: string | null
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           agent_id: string
@@ -1477,9 +1481,13 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean
+          limits_json?: Json | null
           medical_specialty?: string | null
           name: string
+          persona_json?: Json | null
+          tts_voice_id?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           agent_id?: string
@@ -1487,9 +1495,13 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean
+          limits_json?: Json | null
           medical_specialty?: string | null
           name?: string
+          persona_json?: Json | null
+          tts_voice_id?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }

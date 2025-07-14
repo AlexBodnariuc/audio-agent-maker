@@ -117,3 +117,18 @@ export function getErrorMessage(response: ApiResponse): string {
 export function isRateLimitError(response: ApiResponse): boolean {
   return !response.success && response.error?.code === 'RATE_LIMIT';
 }
+
+/**
+ * Voice Agent API functions
+ */
+export async function createVoiceAgent(agentData: {
+  name: string;
+  description?: string;
+  medical_specialty?: string;
+  persona_json?: any;
+  tts_voice_id?: string;
+  limits_json?: any;
+  agent_id?: string;
+}): Promise<ApiResponse> {
+  return callEdgeFunction('create-voice-agent', agentData);
+}

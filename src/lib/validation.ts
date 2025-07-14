@@ -105,6 +105,54 @@ export const createConversationRequestSchema = z.object({
 
 export type CreateConversationRequest = z.infer<typeof createConversationRequestSchema>;
 
+// Voice agent creation request validation
+export const createVoiceAgentRequestSchema = z.object({
+  name: z
+    .string()
+    .min(1, 'Numele este obligatoriu')
+    .max(100, 'Numele nu poate avea mai mult de 100 de caractere')
+    .transform((val) => val.trim()),
+  description: z
+    .string()
+    .max(500, 'Descrierea nu poate avea mai mult de 500 de caractere')
+    .optional()
+    .transform((val) => val?.trim()),
+  medical_specialty: z
+    .string()
+    .optional()
+    .transform((val) => {
+      if (!val) return null;
+      const normalized = val.toLowerCase().trim();
+      return ROMANIAN_MEDICAL_SPECIALTIES.includes(normalized as any) 
+        ? normalized 
+        : null;
+    }),
+  persona_json: z
+    .object({
+      personality: z.string().optional(),
+      communication_style: z.string().optional(),
+      expertise_level: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
+      preferred_language: z.enum(['ro', 'en']).default('ro'),
+      teaching_approach: z.string().optional(),
+    })
+    .default(() => ({ preferred_language: 'ro' as const })),
+  tts_voice_id: z
+    .string()
+    .optional()
+    .refine((val) => !val || ALLOWED_VOICES.includes(val as any), 'Vocea selectată este invalidă'),
+  limits_json: z
+    .object({
+      max_daily_conversations: z.number().int().positive().optional(),
+      max_conversation_length: z.number().int().positive().optional(),
+      allowed_topics: z.array(z.string()).optional(),
+      restricted_topics: z.array(z.string()).optional(),
+    })
+    .default({}),
+  agent_id: z.string().uuid().optional(),
+});
+
+export type CreateVoiceAgentRequest = z.infer<typeof createVoiceAgentRequestSchema>;
+
 // Medical content validation
 export function validateMedicalEducationContent(text: string): boolean {
   // Ensure content is appropriate for high school medical education
