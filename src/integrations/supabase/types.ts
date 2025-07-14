@@ -410,6 +410,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "conversations_email_session_id_fkey"
+            columns: ["email_session_id"]
+            isOneToOne: false
+            referencedRelation: "v_agent_context"
+            referencedColumns: ["user_id"]
+          },
+          {
             foreignKeyName: "conversations_voice_personality_id_fkey"
             columns: ["voice_personality_id"]
             isOneToOne: false
@@ -958,6 +965,13 @@ export type Database = {
             referencedRelation: "email_sessions"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "quiz_sessions_email_session_id_fkey"
+            columns: ["email_session_id"]
+            isOneToOne: false
+            referencedRelation: "v_agent_context"
+            referencedColumns: ["user_id"]
+          },
         ]
       }
       quiz_voice_sessions: {
@@ -1159,6 +1173,13 @@ export type Database = {
             referencedRelation: "email_sessions"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "user_achievements_email_session_id_fkey"
+            columns: ["email_session_id"]
+            isOneToOne: false
+            referencedRelation: "v_agent_context"
+            referencedColumns: ["user_id"]
+          },
         ]
       }
       user_knowledge_areas: {
@@ -1309,6 +1330,13 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "email_sessions"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_progress_email_session_id_fkey"
+            columns: ["email_session_id"]
+            isOneToOne: true
+            referencedRelation: "v_agent_context"
+            referencedColumns: ["user_id"]
           },
         ]
       }
@@ -1507,7 +1535,32 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_agent_context: {
+        Row: {
+          completed_topics: Json | null
+          context_generated_at: string | null
+          current_level: number | null
+          current_streak: number | null
+          daily_goal: number | null
+          difficulty_preference: string | null
+          email: string | null
+          knowledge_areas: Json[] | null
+          language_preference: string | null
+          last_activity_date: string | null
+          learning_level: string | null
+          learning_path_style: string | null
+          learning_style: string | null
+          longest_streak: number | null
+          recent_conversations: Json[] | null
+          recent_quiz_performance: Json[] | null
+          recommended_topics: Json | null
+          specialty_focus: string | null
+          total_achievements: number | null
+          total_xp: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       binary_quantize: {
@@ -1589,6 +1642,10 @@ export type Database = {
       l2_normalize: {
         Args: { "": string } | { "": unknown } | { "": unknown }
         Returns: unknown
+      }
+      refresh_agent_context_view: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
       }
       semantic_search_conversations: {
         Args: {

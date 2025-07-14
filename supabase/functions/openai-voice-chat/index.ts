@@ -4,6 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.50.5";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { makeError, makeSuccess, handleCors, ERROR_CODES } from '../_shared/error-utils.ts';
 import { incrementAndCheck } from '../_shared/rate-limit-utils.ts';
+import { fetchUserContext, buildPrompt, type UserContext, type AgentPersona } from '../_shared/context-builder.ts';
 
 // CORS headers now handled by error-utils
 
@@ -171,8 +172,34 @@ serve(async (req) => {
       console.error('Error fetching message history:', error);
     }
 
-    // Build secure conversation context for OpenAI
-    const systemPrompt = buildMedMentorSystemPrompt(conversation, validatedSpecialty);
+    // Get user context for personalized AI responses
+    let userContext: UserContext | null = null;
+    try {
+      if (conversation.email_session_id) {
+        // Try to get context by user session first
+        const { data: sessionData } = await supabase
+          .from('email_sessions')
+          .select('email')
+          .eq('id', conversation.email_session_id)
+          .single();
+        
+        if (sessionData?.email) {
+          userContext = await fetchUserContext(supabase, sessionData.email, 'email');
+        }
+      } else if (conversation.user_id) {
+        // Fallback to user_id if available
+        userContext = await fetchUserContext(supabase, conversation.user_id, 'user_id');
+      }
+    } catch (error) {
+      console.error('Error fetching user context:', error);
+      // Continue without context
+    }
+
+    // Build context-aware conversation prompt for OpenAI
+    const baseInstructions = buildBaseMedMentorInstructions();
+    const agentPersona: AgentPersona | null = conversation.voice_personalities?.persona_json || null;
+    const contextualPrompt = buildPrompt(baseInstructions, agentPersona, userContext, validatedSpecialty);
+    const systemPrompt = contextualPrompt.systemPrompt;
     const conversationHistory = buildConversationHistory(messages);
 
     // Generate AI response with security controls
@@ -280,12 +307,9 @@ serve(async (req) => {
 // Rate limiting function replaced by shared utilities
 // This function is now deprecated - using incrementAndCheck from rate-limit-utils.ts
 
-// MedMentor-focused system prompt with Romanian medical education context
-function buildMedMentorSystemPrompt(conversation: any, specialtyFocus: string): string {
-  const personality = conversation.voice_personalities;
-  const name = personality?.name || 'MedMentor';
-  
-  return `Ești ${name}, asistentul AI specializat în pregătirea pentru admiterea la medicina în România.
+// Base MedMentor instructions for context-aware prompting
+function buildBaseMedMentorInstructions(): string {
+  return `Ești MedMentor, asistentul AI specializat în pregătirea pentru admiterea la medicina în România.
 
 🎯 MISIUNEA TA:
 Să ajuți elevii români de liceu să se pregătească eficient pentru examenele de admitere la UMF, concentrându-te pe biologia și chimia necesare pentru a deveni medic.
@@ -295,9 +319,6 @@ Să ajuți elevii români de liceu să se pregătească eficient pentru examenel
 - Nivel țintă: elevi clasele XI-XII care vor să intre la medicină
 - Focus: concepte fundamentale pentru admiterea la UMF
 - Terminologie: medicală românească corectă cu explicații clare
-
-🧠 SPECIALITATEA TA: ${specialtyFocus}
-Sesiune: ${conversation.voice_session_type || 'învățare generală'}
 
 ✨ STILUL TĂU DE PREDARE:
 - Conversațional și prietenos, dar profesional
