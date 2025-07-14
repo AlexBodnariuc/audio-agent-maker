@@ -1003,6 +1003,7 @@ export type Database = {
           identifier_type: string
           max_attempts: number
           updated_at: string
+          user_id: string | null
           window_duration: unknown
           window_start: string
         }
@@ -1015,6 +1016,7 @@ export type Database = {
           identifier_type: string
           max_attempts?: number
           updated_at?: string
+          user_id?: string | null
           window_duration?: unknown
           window_start?: string
         }
@@ -1027,6 +1029,7 @@ export type Database = {
           identifier_type?: string
           max_attempts?: number
           updated_at?: string
+          user_id?: string | null
           window_duration?: unknown
           window_start?: string
         }

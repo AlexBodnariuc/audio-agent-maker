@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.5';
+import { makeError, makeSuccess, handleCors, ERROR_CODES } from '../_shared/error-utils.ts';
 
 // Common validation schema
 const voiceChatRequestSchema = {
@@ -32,25 +33,16 @@ function validateRequest(data: any) {
   return result;
 }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
 serve(async (req) => {
   // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
 
   try {
     // Get authorization header and validate JWT
     const authHeader = req.headers.get('authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return new Response(JSON.stringify({ error: 'Missing or invalid authorization header' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
+      return makeError('UNAUTHORIZED', 401, undefined, 'Missing or invalid authorization header');
     }
 
     const supabaseClient = createClient(
@@ -65,21 +57,37 @@ serve(async (req) => {
       }
     );
 
-    const rawBody = await req.json();
-    const { specialtyFocus, quizSessionId, sessionType } = validateRequest(rawBody);
+    const rawBody = await req.json().catch(() => null);
+    if (!rawBody) {
+      return makeError('VALIDATION_ERROR', 400, undefined, 'JSON invalid în corpul cererii');
+    }
+
+    let validatedData;
+    try {
+      validatedData = validateRequest(rawBody);
+    } catch (error) {
+      return makeError('VALIDATION_ERROR', 400, { originalError: error.message }, error.message);
+    }
+
+    const { specialtyFocus, quizSessionId, sessionType } = validatedData;
 
     console.log('Creating conversation with:', { specialtyFocus, quizSessionId, sessionType });
 
     // Get default voice personality
-    const { data: personality } = await supabaseClient
+    const { data: personality, error: personalityError } = await supabaseClient
       .from('voice_personalities')
       .select('id')
       .eq('is_active', true)
       .limit(1)
       .single();
 
+    if (personalityError) {
+      console.error('Error fetching voice personality:', personalityError);
+      return makeError('INTERNAL_ERROR', 500, { originalError: personalityError.message }, 'Error fetching voice personality');
+    }
+
     if (!personality) {
-      throw new Error('No active voice personality found');
+      return makeError('NOT_FOUND', 404, undefined, 'No active voice personality found');
     }
 
     // Create conversation with proper data structure
@@ -109,32 +117,18 @@ serve(async (req) => {
 
     if (error) {
       console.error('Error creating conversation:', error);
-      throw error;
+      return makeError('INTERNAL_ERROR', 500, { originalError: error.message }, 'Error creating conversation');
     }
 
     console.log('Created conversation:', conversation);
 
-    return new Response(
-      JSON.stringify({ 
-        conversationId: conversation.id,
-        conversation 
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return makeSuccess({ 
+      conversationId: conversation.id,
+      conversation 
+    });
 
   } catch (error) {
     console.error('Error in create-conversation function:', error);
-    return new Response(
-      JSON.stringify({ 
-        error: error.message,
-        details: error.details || 'Unknown error'
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return makeError('INTERNAL_ERROR', 500, { originalError: error.message }, error.message || 'Unknown error');
   }
 });

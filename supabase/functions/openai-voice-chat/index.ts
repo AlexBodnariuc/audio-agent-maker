@@ -2,11 +2,10 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.50.5";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { makeError, makeSuccess, handleCors, ERROR_CODES } from '../_shared/error-utils.ts';
+import { incrementAndCheck } from '../_shared/rate-limit-utils.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// CORS headers now handled by error-utils
 
 // Validation schemas with Zod
 const MAX_MESSAGE_LENGTH = 2000;
@@ -53,17 +52,21 @@ const voiceChatRequestSchema = z.object({
 const MAX_CONVERSATION_HISTORY = 10;
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  // Handle CORS preflight requests
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
 
   try {
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-    if (!openaiApiKey || !supabaseUrl || !supabaseServiceRoleKey) {
-      throw new Error('Missing required environment variables');
+    if (!openaiApiKey) {
+      return makeError('INTERNAL_ERROR', 500, undefined, 'Configurația serverului este incompletă. Vă rugăm să contactați administratorul.');
+    }
+
+    if (!supabaseUrl || !supabaseServiceRoleKey) {
+      return makeError('INTERNAL_ERROR', 500, undefined, 'Configurația bazei de date este incompletă.');
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
@@ -73,7 +76,7 @@ serve(async (req) => {
     // Parse and validate request body with Zod
     const rawBody = await req.text();
     if (rawBody.length > MAX_REQUEST_SIZE) {
-      throw new Error('Cererea este prea mare');
+      return makeError('VALIDATION_ERROR', 400, undefined, 'Cererea este prea mare');
     }
 
     let parsedBody;
@@ -81,14 +84,14 @@ serve(async (req) => {
       parsedBody = JSON.parse(rawBody);
     } catch (error) {
       console.error('Failed to parse request body:', error);
-      throw new Error('JSON invalid în corpul cererii');
+      return makeError('VALIDATION_ERROR', 400, undefined, 'JSON invalid în corpul cererii');
     }
 
     // Validate with Zod schema
     const validationResult = voiceChatRequestSchema.safeParse(parsedBody);
     if (!validationResult.success) {
       const firstError = validationResult.error.errors[0];
-      throw new Error(firstError?.message || 'Validation error');
+      return makeError('VALIDATION_ERROR', 400, { validationErrors: validationResult.error.errors }, firstError?.message || 'Validation error');
     }
 
     const { 
@@ -125,17 +128,21 @@ serve(async (req) => {
     ]) as any;
 
     if (convError) {
-      throw new Error(`Eroare la obținerea conversației: ${convError.message}`);
+      return makeError('CONVERSATION_NOT_FOUND', 404, { originalError: convError.message }, `Eroare la obținerea conversației: ${convError.message}`);
     }
 
     if (!conversation) {
-      throw new Error('Conversația nu a fost găsită');
+      return makeError('CONVERSATION_NOT_FOUND', 404, undefined, 'Conversația nu a fost găsită');
     }
 
-    // Rate limiting check (basic implementation)
-    const rateLimitCheck = await checkRateLimit(supabase, conversationId);
+    // Enhanced rate limiting with user support
+    const userId = conversation.user_id;
+    const rateLimitCheck = await incrementAndCheck(supabase, userId, conversationId);
     if (!rateLimitCheck.allowed) {
-      throw new Error('Prea multe cereri. Vă rugăm să așteptați.');
+      return makeError('RATE_LIMIT', 429, { 
+        remaining: rateLimitCheck.remaining,
+        resetTime: rateLimitCheck.resetTime 
+      }, 'Prea multe cereri. Vă rugăm să așteptați.');
     }
 
     // Get recent conversation history with security filtering
@@ -179,11 +186,11 @@ serve(async (req) => {
       );
     } catch (error) {
       console.error('Error generating AI response:', error);
-      throw new Error(`Eroare la generarea răspunsului AI: ${error.message}`);
+      return makeError('OPENAI_ERROR', 502, { originalError: error.message }, `Eroare la generarea răspunsului AI: ${error.message}`);
     }
 
     if (!aiResponse || typeof aiResponse !== 'string' || aiResponse.trim().length === 0) {
-      throw new Error('Răspunsul AI generat este invalid');
+      return makeError('OPENAI_ERROR', 502, undefined, 'Răspunsul AI generat este invalid');
     }
 
     // Sanitize AI response for safety
@@ -245,92 +252,33 @@ serve(async (req) => {
 
     console.log(`Successfully processed OpenAI voice chat for conversation ${conversationId}`);
 
-    return new Response(JSON.stringify({
-      success: true,
+    return makeSuccess({
       response: aiResponse,
       audioContent,
       conversationId,
       metadata: {
         hasAudio: !!audioContent,
         messageLength: aiResponse.length,
-        voice: useVoice ? validatedVoice : null
+        voice: useVoice ? validatedVoice : null,
+        rateLimitRemaining: rateLimitCheck.remaining
       }
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
     console.error('Error in openai-voice-chat function:', error);
     
-    // Return structured error response
-    const errorResponse = {
-      error: error.message,
-      success: false,
-      timestamp: new Date().toISOString()
-    };
-
-    // Determine appropriate status code
-    let statusCode = 500;
-    if (error.message.includes('required') || error.message.includes('Invalid')) {
-      statusCode = 400;
-    } else if (error.message.includes('not found')) {
-      statusCode = 404;
-    } else if (error.message.includes('timeout')) {
-      statusCode = 408;
+    // Handle different error types
+    if (error.message.includes('timeout')) {
+      return makeError('INTERNAL_ERROR', 408, { originalError: error.message }, 'Timeout în procesarea cererii');
     }
-
-    return new Response(JSON.stringify(errorResponse), {
-      status: statusCode,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    
+    // Generic internal error
+    return makeError('INTERNAL_ERROR', 500, { originalError: error.message }, error.message);
   }
 });
 
-// Rate limiting function for security
-async function checkRateLimit(supabase: any, conversationId: string): Promise<{ allowed: boolean; remaining?: number }> {
-  try {
-    const now = new Date();
-    const windowStart = new Date(now.getTime() - 60000); // 1 minute window
-    
-    // Check existing rate limit entries
-    const { data: rateLimits, error } = await supabase
-      .from('rate_limits')
-      .select('*')
-      .eq('identifier', conversationId)
-      .eq('action', 'voice_chat')
-      .gte('window_start', windowStart.toISOString());
-
-    if (error) {
-      console.error('Rate limit check error:', error);
-      return { allowed: true }; // Allow on error to prevent blocking
-    }
-
-    const currentCount = rateLimits?.length || 0;
-    const maxRequests = 20; // 20 requests per minute
-
-    if (currentCount >= maxRequests) {
-      return { allowed: false };
-    }
-
-    // Insert new rate limit entry
-    await supabase
-      .from('rate_limits')
-      .insert({
-        identifier: conversationId,
-        identifier_type: 'conversation',
-        action: 'voice_chat',
-        count: 1,
-        max_attempts: maxRequests,
-        window_start: windowStart.toISOString(),
-        window_duration: '00:01:00'
-      });
-
-    return { allowed: true, remaining: maxRequests - currentCount - 1 };
-  } catch (error) {
-    console.error('Rate limiting error:', error);
-    return { allowed: true }; // Allow on error
-  }
-}
+// Rate limiting function replaced by shared utilities
+// This function is now deprecated - using incrementAndCheck from rate-limit-utils.ts
 
 // MedMentor-focused system prompt with Romanian medical education context
 function buildMedMentorSystemPrompt(conversation: any, specialtyFocus: string): string {
