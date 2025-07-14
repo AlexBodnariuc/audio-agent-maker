@@ -232,12 +232,37 @@ export default function VoiceTutorPanel({
   // Start realtime session with improved error handling
   const startSession = async () => {
     try {
+      console.log('=== STARTING VOICE TUTOR SESSION ===');
+      console.log('Conversation ID:', conversationId);
+      console.log('Specialty Focus:', specialtyFocus);
+      console.log('Voice:', voice);
+      
       setConnectionStatus('connecting');
       setSessionState('connecting');
       setLastError(null);
       setRetryCount(0);
       
-      const wsUrl = `wss://ybdvhqmjlztlvrfurkaf.functions.supabase.co/functions/v1/openai-realtime-voice?conversationId=${conversationId}&specialtyFocus=${specialtyFocus}&voice=${voice}`;
+      // Enhanced URL validation
+      if (!conversationId) {
+        throw new Error('ID-ul conversației lipsește');
+      }
+      
+      // Validate UUID format
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(conversationId)) {
+        throw new Error('Format invalid pentru ID-ul conversației');
+      }
+      
+      const wsUrl = `wss://ybdvhqmjlztlvrfurkaf.functions.supabase.co/functions/v1/openai-realtime-voice?conversationId=${encodeURIComponent(conversationId)}&specialtyFocus=${encodeURIComponent(specialtyFocus)}&voice=${encodeURIComponent(voice)}`;
+      console.log('WebSocket URL:', wsUrl);
+      
+      // Close existing connection if any
+      if (wsRef.current) {
+        console.log('Closing existing WebSocket connection');
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      
       wsRef.current = new WebSocket(wsUrl);
 
       // Enhanced heartbeat with timeout detection - OPTIMIZED FOR 1006 ERROR FIX
@@ -686,9 +711,19 @@ export default function VoiceTutorPanel({
     }
   };
 
-  // Retry connection
+  // Enhanced retry connection logic with better error handling
   const retryConnection = async () => {
+    console.log('=== RETRY CONNECTION CALLED ===');
+    console.log('Current retry count:', retryCount);
+    console.log('Max retries:', maxRetries);
+    console.log('Current session state:', sessionState);
+    console.log('WebSocket ready state:', wsRef.current?.readyState);
+    
     if (retryCount >= maxRetries) {
+      console.error('Max retries exceeded, stopping retry attempts');
+      setCanRetry(false);
+      setSessionState('error');
+      
       toast({
         title: "Încercări Epuizate",
         description: "Nu s-a putut restabili conexiunea după multiple încercări",
@@ -697,20 +732,88 @@ export default function VoiceTutorPanel({
       return;
     }
     
-    setRetryCount(prev => prev + 1);
-    console.log(`Retrying connection... attempt ${retryCount + 1}`);
-    
-    // Close existing connection
-    if (wsRef.current) {
-      wsRef.current.close();
+    // Stop any existing audio recording
+    if (recorderRef.current) {
+      console.log('Stopping existing audio recorder during retry');
+      recorderRef.current.stop();
+      recorderRef.current = null;
     }
     
-    // Wait a bit before retrying
-    setTimeout(() => {
-      if (retryCount < maxRetries) {
-        startSession();
+    // Clear heartbeat
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
+    
+    // Close existing WebSocket connection gracefully
+    if (wsRef.current) {
+      console.log('Closing existing WebSocket connection for retry');
+      try {
+        if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+          wsRef.current.close(1000, 'Retry attempt');
+        }
+      } catch (error) {
+        console.warn('Error closing WebSocket during retry:', error);
       }
-    }, 2000 * retryCount); // Exponential backoff
+      wsRef.current = null;
+    }
+    
+    // Update retry count
+    const currentRetryCount = retryCount + 1;
+    setRetryCount(currentRetryCount);
+    setSessionState('reconnecting');
+    setAutoRecordingEnabled(false); // Reset auto recording flag
+    
+    console.log(`Retrying connection... attempt ${currentRetryCount}/${maxRetries}`);
+    
+    // Progressive delay with jitter for retry attempts
+    const baseDelay = Math.min(1000 * Math.pow(1.5, currentRetryCount - 1), 8000);
+    const jitter = Math.random() * 500; // Add up to 500ms of jitter
+    const totalDelay = baseDelay + jitter;
+    
+    console.log(`Waiting ${Math.round(totalDelay)}ms before retry attempt ${currentRetryCount}`);
+    
+    toast({
+      title: "Reconectare...",
+      description: `Încercarea ${currentRetryCount}/${maxRetries} în ${Math.round(totalDelay/1000)} secunde`,
+    });
+    
+    // Wait before retrying
+    setTimeout(async () => {
+      if (retryCount < maxRetries) { // Double-check to prevent race conditions
+        console.log(`Starting retry attempt ${currentRetryCount}`);
+        try {
+          await startSession();
+        } catch (error) {
+          console.error('Error during retry attempt:', error);
+          
+          // If retry fails, try again (unless we've exceeded max retries)
+          if (currentRetryCount < maxRetries) {
+            setTimeout(() => retryConnection(), 2000);
+          } else {
+            setCanRetry(false);
+            setSessionState('error');
+            
+            toast({
+              title: "Toate Încercările Eșuate",
+              description: "Nu s-a putut restabili conexiunea. Vă rugăm să încercați din nou mai târziu.",
+              variant: "destructive",
+            });
+          }
+        }
+      } else {
+        console.log('Max retries reached during timeout, stopping retry attempts');
+      }
+    }, totalDelay);
+  };
+
+  // Force retry function for manual retries
+  const forceRetry = () => {
+    console.log('Force retry triggered by user');
+    setRetryCount(0); // Reset retry count for manual retry
+    setCanRetry(true);
+    setLastError(null);
+    retryConnection();
   };
 
   // End session
@@ -900,16 +1003,104 @@ export default function VoiceTutorPanel({
           </div>
         )}
 
+        {/* Error Display and Retry Options */}
+        {(connectionStatus === 'error' || sessionState === 'error') && (
+          <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 animate-fade-in">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 bg-destructive rounded-full" />
+              <h3 className="font-medium text-destructive">Problemă de Conexiune</h3>
+            </div>
+            {lastError && (
+              <p className="text-sm text-destructive mb-3">{lastError}</p>
+            )}
+            
+            {/* Session Metrics Display */}
+            {sessionMetrics.errorsCount > 0 && (
+              <div className="text-xs text-muted-foreground mb-3 space-y-1">
+                <div>Mesaje procesate: {sessionMetrics.messagesProcessed}</div>
+                <div>Erori: {sessionMetrics.errorsCount}</div>
+                <div>Reconectări: {sessionMetrics.reconnectCount}</div>
+                {queueLength > 0 && <div>Mesaje în coadă: {queueLength}</div>}
+              </div>
+            )}
+            
+            <div className="flex gap-2">
+              {canRetry && (
+                <Button 
+                  onClick={forceRetry}
+                  size="sm"
+                  variant="outline"
+                  disabled={sessionState === 'reconnecting'}
+                >
+                  {sessionState === 'reconnecting' ? 'Se reconectează...' : 'Încearcă Din Nou'}
+                </Button>
+              )}
+              <Button 
+                onClick={() => {
+                  setConnectionStatus('disconnected');
+                  setSessionState('disconnected');
+                  setLastError(null);
+                  setRetryCount(0);
+                  setCanRetry(true);
+                }}
+                size="sm"
+                variant="secondary"
+              >
+                Resetează
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Connection Status Details */}
+        {isConnected && sessionState !== 'ready' && (
+          <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20 animate-fade-in">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <h3 className="font-medium text-blue-600">Se configurează sesiunea...</h3>
+            </div>
+            <p className="text-sm text-blue-600/80">
+              {sessionState === 'connecting' && 'Se conectează la serviciul vocal...'}
+              {sessionState === 'configuring' && 'Se configurează OpenAI Realtime API...'}
+              {sessionState === 'reconnecting' && `Reconectare în curs... (${retryCount}/${maxRetries})`}
+            </p>
+            {queueLength > 0 && (
+              <p className="text-xs text-blue-600/60 mt-1">
+                {queueLength} mesaje în așteptare
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Test Button (for development) */}
-        {isConnected && (
+        {isConnected && sessionState === 'ready' && (
           <div className="text-center pt-4 border-t border-border">
-            <Button 
-              onClick={() => sendTextMessage('Ce este enzima?')}
-              variant="outline"
-              size="sm"
-            >
-              Test cu "Ce este enzima?"
-            </Button>
+            <div className="space-y-2">
+              <div className="text-xs text-muted-foreground">Test Rapid</div>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button 
+                  onClick={() => sendTextMessage('Ce este enzima?')}
+                  variant="outline"
+                  size="sm"
+                >
+                  "Ce este enzima?"
+                </Button>
+                <Button 
+                  onClick={() => sendTextMessage('Explică-mi fotosinteza')}
+                  variant="outline"
+                  size="sm"
+                >
+                  "Explică-mi fotosinteza"
+                </Button>
+                <Button 
+                  onClick={() => sendTextMessage('Ce sunt proteinele?')}
+                  variant="outline"
+                  size="sm"
+                >
+                  "Ce sunt proteinele?"
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </CardContent>

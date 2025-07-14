@@ -54,8 +54,14 @@ const HEARTBEAT_TIMEOUT = 45000; // 45 seconds heartbeat timeout
 const GRACEFUL_CLOSE_TIMEOUT = 5000; // 5 seconds for graceful close
 
 serve(async (req) => {
+  console.log('=== REALTIME VOICE FUNCTION START ===');
+  console.log('Request method:', req.method);
+  console.log('Request URL:', req.url);
+  console.log('Headers:', Object.fromEntries(req.headers.entries()));
+  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
+    console.log('CORS preflight request handled');
     return new Response(null, { headers: corsHeaders });
   }
 
@@ -63,32 +69,70 @@ serve(async (req) => {
   const upgradeHeader = headers.get("upgrade") || "";
 
   if (upgradeHeader.toLowerCase() !== "websocket") {
-    return new Response("Expected WebSocket connection", { 
+    console.error('Not a WebSocket request. Upgrade header:', upgradeHeader);
+    return new Response(JSON.stringify({ 
+      error: "Expected WebSocket connection",
+      received: upgradeHeader 
+    }), { 
       status: 400,
-      headers: corsHeaders 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 
   try {
+    // Enhanced environment variable validation with detailed logging
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-    if (!openaiApiKey || !supabaseUrl || !supabaseServiceRoleKey) {
-      throw new Error('Missing required environment variables');
+    console.log('Environment variables check:');
+    console.log('- OPENAI_API_KEY:', openaiApiKey ? 'Present' : 'MISSING');
+    console.log('- SUPABASE_URL:', supabaseUrl ? 'Present' : 'MISSING');
+    console.log('- SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceRoleKey ? 'Present' : 'MISSING');
+
+    const missingVars = [];
+    if (!openaiApiKey) missingVars.push('OPENAI_API_KEY');
+    if (!supabaseUrl) missingVars.push('SUPABASE_URL');
+    if (!supabaseServiceRoleKey) missingVars.push('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (missingVars.length > 0) {
+      const error = `Missing required environment variables: ${missingVars.join(', ')}`;
+      console.error('Environment variable error:', error);
+      throw new Error(error);
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: { persistSession: false }
     });
 
-    // Parse query parameters for session config
+    // Parse query parameters for session config with proper validation
     const url = new URL(req.url);
     const conversationId = url.searchParams.get('conversationId');
     const specialtyFocus = url.searchParams.get('specialtyFocus') || 'biologie';
     const voice = url.searchParams.get('voice') || 'alloy';
 
-    // Validate parameters
+    console.log('URL parameters received:', { conversationId, specialtyFocus, voice });
+
+    // Enhanced validation with better error messages
+    if (!conversationId) {
+      console.error('Missing conversationId parameter');
+      throw new Error('Parametrul conversationId este obligatoriu');
+    }
+
+    // UUID validation for conversationId
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(conversationId)) {
+      console.error('Invalid UUID format for conversationId:', conversationId);
+      throw new Error('ID-ul conversației este invalid (format UUID necesar)');
+    }
+
+    // Validate voice parameter against allowed values
+    const allowedVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+    if (!allowedVoices.includes(voice)) {
+      console.error('Invalid voice parameter:', voice);
+      throw new Error(`Vocea specificată nu este validă. Voci disponibile: ${allowedVoices.join(', ')}`);
+    }
+
     const validationResult = realtimeSessionRequestSchema.safeParse({
       conversationId,
       specialtyFocus,
@@ -96,7 +140,9 @@ serve(async (req) => {
     });
 
     if (!validationResult.success) {
-      throw new Error(`Parametri invalizi: ${validationResult.error.errors[0]?.message}`);
+      console.error('Zod validation failed:', validationResult.error.errors);
+      const errorMessage = validationResult.error.errors.map(e => e.message).join(', ');
+      throw new Error(`Parametri invalizi: ${errorMessage}`);
     }
 
     const { conversationId: validConversationId, specialtyFocus: validSpecialty, voice: validVoice } = validationResult.data;
@@ -687,17 +733,59 @@ serve(async (req) => {
     };
 
   } catch (error) {
-    console.error('Error setting up WebSocket connection:', error);
+    console.error('=== EDGE FUNCTION ERROR ===');
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Request details:', {
+      method: req.method,
+      url: req.url,
+      headers: Object.fromEntries(req.headers.entries())
+    });
+    
+    // Determine appropriate error response based on error type
+    let statusCode = 500;
+    let errorMessage = 'Internal server error';
+    
+    if (error.message.includes('environment variables')) {
+      statusCode = 503; // Service Unavailable
+      errorMessage = 'Service configuration error';
+    } else if (error.message.includes('Parametri invalizi') || error.message.includes('Invalid')) {
+      statusCode = 400; // Bad Request
+      errorMessage = error.message;
+    } else if (error.message.includes('Conversația nu a fost găsită')) {
+      statusCode = 404; // Not Found
+      errorMessage = error.message;
+    } else if (error.message.includes('Prea multe sesiuni')) {
+      statusCode = 429; // Too Many Requests
+      errorMessage = error.message;
+    } else {
+      // Generic server error
+      errorMessage = 'A apărut o problemă cu serviciul vocal';
+    }
+    
+    console.error(`Returning ${statusCode} error: ${errorMessage}`);
+    
     return new Response(JSON.stringify({ 
-      error: error.message,
-      timestamp: Date.now()
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      timestamp: Date.now(),
+      request_id: crypto.randomUUID()
     }), {
-      status: 500,
+      status: statusCode,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  return response;
+  // This should never be reached due to WebSocket upgrade, but add as fallback
+  console.warn('Reached end of function without returning response - this should not happen');
+  return new Response(JSON.stringify({ 
+    error: 'Unexpected execution path',
+    timestamp: Date.now()
+  }), {
+    status: 500,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
 });
 
 // Rate limiting function with improved logic
