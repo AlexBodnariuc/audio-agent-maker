@@ -92,12 +92,12 @@ serve(async (req) => {
       return makeError('NOT_FOUND', 404, undefined, 'No active voice personality found');
     }
 
-    // For demo sessions, create a temporary email session to satisfy RLS
+    // Handle different session types
     let emailSessionId = null;
     let userId = null;
 
     if (sessionType === 'demo_chat') {
-      // Create a temporary demo session
+      // Create a temporary demo session for RLS compliance
       const demoEmail = `demo_${Date.now()}@medmentor.demo`;
       const { data: demoSession, error: demoError } = await supabaseClient
         .from('email_sessions')
@@ -118,12 +118,17 @@ serve(async (req) => {
       emailSessionId = demoSession.id;
       console.log('Created demo email session:', emailSessionId);
     } else {
-      // Try to get authenticated user
+      // For authenticated users, get user from auth
       if (authHeader) {
         const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-        if (!userError && user) {
-          userId = user.id;
+        if (userError || !user) {
+          console.error('Authentication failed for non-demo session:', userError);
+          return makeError('UNAUTHORIZED', 401, { originalError: userError?.message }, 'Authentication required for this session type');
         }
+        userId = user.id;
+        console.log('Using authenticated user:', userId);
+      } else {
+        return makeError('UNAUTHORIZED', 401, undefined, 'Authentication required for this session type');
       }
     }
 

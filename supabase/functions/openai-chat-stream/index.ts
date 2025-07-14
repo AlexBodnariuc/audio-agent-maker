@@ -50,48 +50,73 @@ serve(async (req) => {
 
     // Initialize Supabase client for this request
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return makeError('UNAUTHORIZED', 401, null, 'Token de autentificare lipsește');
-    }
-
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
-        headers: { Authorization: authHeader }
+        headers: authHeader ? { Authorization: authHeader } : {}
       }
     });
 
-    // Get authenticated user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      console.error('Authentication failed:', userError);
-      return makeError('UNAUTHORIZED', 401, userError, 'Autentificare eșuată');
+    // Check if user is authenticated or if this is a demo session
+    let user_id = null;
+    let user_email = null;
+    
+    if (authHeader) {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!userError && user) {
+        user_id = user.id;
+        user_email = user.email;
+        console.log(`Processing chat stream for authenticated user: ${user_id}`);
+      }
     }
 
-    const user_id = user.id;
-    console.log(`Processing chat stream for user: ${user_id}`);
+    // If no authenticated user, check if this is a demo conversation
+    if (!user_id) {
+      const { data: demoConversation, error: demoError } = await supabase
+        .from('conversations')
+        .select('id, email_sessions!inner(email)')
+        .eq('id', conversation_id)
+        .like('email_sessions.email', '%@medmentor.demo')
+        .single();
+      
+      if (!demoError && demoConversation) {
+        console.log('Processing chat stream for demo session');
+        user_email = demoConversation.email_sessions.email;
+      } else {
+        return makeError('UNAUTHORIZED', 401, null, 'Autentificare necesară');
+      }
+    }
 
-    // Rate limiting
-    const rateLimitResult = await incrementAndCheck(supabase, user_id, conversation_id, 30, 'live_chat');
+    // Rate limiting (use user_id or conversation_id for demo)
+    const rateLimitIdentifier = user_id || conversation_id;
+    const rateLimitResult = await incrementAndCheck(supabase, rateLimitIdentifier, conversation_id, 30, 'live_chat');
     if (!rateLimitResult.allowed) {
-      console.log(`Rate limit exceeded for user: ${user_id}`);
+      console.log(`Rate limit exceeded for identifier: ${rateLimitIdentifier}`);
       return makeError('RATE_LIMIT', 429, { remaining: rateLimitResult.remaining });
     }
 
-    // Verify conversation exists and belongs to user
-    const { data: conversation, error: convError } = await supabase
+    // Verify conversation exists and belongs to user or is a demo
+    let conversationQuery = supabase
       .from('conversations')
       .select('id, voice_personality_id')
-      .eq('id', conversation_id)
-      .or(`user_id.eq.${user_id},email_session_id.in.(select id from email_sessions where email = '${user.email}')`)
-      .single();
+      .eq('id', conversation_id);
+
+    if (user_id) {
+      // For authenticated users
+      conversationQuery = conversationQuery.or(`user_id.eq.${user_id},email_session_id.in.(select id from email_sessions where email = '${user_email}')`);
+    } else {
+      // For demo sessions, verify it has a demo email session
+      conversationQuery = conversationQuery.not('email_session_id', 'is', null);
+    }
+
+    const { data: conversation, error: convError } = await conversationQuery.single();
 
     if (convError || !conversation) {
       console.error('Conversation not found:', convError);
       return makeError('CONVERSATION_NOT_FOUND', 404, convError);
     }
 
-    // Fetch user context
-    const userContext = await fetchUserContext(supabase, user_id, 'user_id');
+    // Fetch user context (only for authenticated users)
+    const userContext = user_id ? await fetchUserContext(supabase, user_id, 'user_id') : null;
     console.log('User context fetched:', !!userContext);
 
     // Fetch agent persona
@@ -239,6 +264,17 @@ serve(async (req) => {
           if (assistantMessageId && agentPersona?.tts_voice_id) {
             console.log('Enqueuing TTS job...');
             
+            // For demo sessions, we need to get the email_session_id from the conversation
+            let emailSessionId = null;
+            if (!user_id) {
+              const { data: conv } = await supabase
+                .from('conversations')
+                .select('email_session_id')
+                .eq('id', conversation_id)
+                .single();
+              emailSessionId = conv?.email_session_id;
+            }
+            
             const { error: ttsError } = await supabase
               .from('tts_jobs')
               .insert({
@@ -247,6 +283,7 @@ serve(async (req) => {
                 voice_id: agentPersona.tts_voice_id,
                 model: 'eleven_multilingual_v2',
                 user_id,
+                email_session_id: emailSessionId,
                 conversation_id,
                 priority: 5
               });
