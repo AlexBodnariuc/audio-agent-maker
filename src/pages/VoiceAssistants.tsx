@@ -12,6 +12,7 @@ import CreateAgentDialog from "@/components/voice/CreateAgentDialog";
 import AgentTestingPanel from "@/components/voice/AgentTestingPanel";
 import VoiceTutorPanel from "@/components/VoiceTutorPanel";
 import VoiceAgentManagement from "@/components/voice/VoiceAgentManagement";
+import { Speech2SpeechInterface } from "@/components/medmentor/Speech2SpeechInterface";
 import { ROMANIAN_TRANSLATIONS } from "@/components/medmentor/RomanianUI";
 import type { VoiceAgent } from "@/lib/validation";
 
@@ -412,8 +413,11 @@ export default function VoiceAssistants() {
           </div>
         </div>
 
-        <Tabs defaultValue="realtime" className="space-y-6">
-          <TabsList className="grid w-full max-w-2xl grid-cols-3">
+        <Tabs defaultValue="speech2speech" className="space-y-6">
+          <TabsList className="grid w-full max-w-2xl grid-cols-4">
+            <TabsTrigger value="speech2speech" className="flex items-center gap-2">
+              🎤 Chat Vocal
+            </TabsTrigger>
             <TabsTrigger value="realtime" className="flex items-center gap-2">
               <Sparkles className="h-4 w-4" />
               🎙️ Voce Real-Time
@@ -427,6 +431,20 @@ export default function VoiceAssistants() {
               Testează
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="speech2speech" className="space-y-6">
+            <div className="max-w-4xl mx-auto">
+              <Speech2SpeechInterface
+                conversationId={testConversationId || "demo-conversation-123"}
+                voice="alloy"
+                language="ro"
+                showTranscriptions={true}
+                onTranscription={(text) => console.log('Transcription:', text)}
+                onAIResponse={(text) => console.log('AI Response:', text)}
+                onError={(error) => console.error('Speech2Speech Error:', error)}
+              />
+            </div>
+          </TabsContent>
 
           <TabsContent value="realtime" className="space-y-6">
             {testConversationId ? (

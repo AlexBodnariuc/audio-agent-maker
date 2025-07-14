@@ -297,6 +297,7 @@ export type Database = {
           content: string
           conversation_id: string
           created_at: string
+          display_in_ui: boolean | null
           id: string
           language_detected: string | null
           medical_entities: Json | null
@@ -312,6 +313,7 @@ export type Database = {
           content: string
           conversation_id: string
           created_at?: string
+          display_in_ui?: boolean | null
           id?: string
           language_detected?: string | null
           medical_entities?: Json | null
@@ -327,6 +329,7 @@ export type Database = {
           content?: string
           conversation_id?: string
           created_at?: string
+          display_in_ui?: boolean | null
           id?: string
           language_detected?: string | null
           medical_entities?: Json | null
