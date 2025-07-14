@@ -194,7 +194,9 @@ export default function VoiceTutorPanel({
   const recorderRef = useRef<AudioRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
-  const maxRetries = 5; // Increased retry attempts
+  const maxRetries = 8; // Further increased for 1006 error resilience
+  const connectionTimeout = 25000; // 25 seconds timeout for client connection
+  const heartbeatTimeout = 35000; // 35 seconds heartbeat timeout
 
   // Initialize audio context
   useEffect(() => {
@@ -238,7 +240,9 @@ export default function VoiceTutorPanel({
       const wsUrl = `wss://ybdvhqmjlztlvrfurkaf.functions.supabase.co/functions/v1/openai-realtime-voice?conversationId=${conversationId}&specialtyFocus=${specialtyFocus}&voice=${voice}`;
       wsRef.current = new WebSocket(wsUrl);
 
-      // Setup heartbeat to monitor connection health
+      // Enhanced heartbeat with timeout detection - OPTIMIZED FOR 1006 ERROR FIX
+      let lastPongReceived = Date.now();
+      
       const setupHeartbeat = () => {
         if (heartbeatRef.current) {
           clearInterval(heartbeatRef.current);
@@ -246,13 +250,53 @@ export default function VoiceTutorPanel({
         
         heartbeatRef.current = setInterval(() => {
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            const now = Date.now();
+            const timeSinceLastPong = now - lastPongReceived;
+            
+            // Check if we've missed too many heartbeats
+            if (timeSinceLastPong > heartbeatTimeout) {
+              console.warn(`Heartbeat timeout detected: ${timeSinceLastPong}ms since last pong`);
+              toast({
+                title: "Conexiune Instabilă",
+                description: "Se reîncearcă conectarea...",
+              });
+              retryConnection();
+              return;
+            }
+            
             wsRef.current.send(JSON.stringify({ type: 'ping' }));
             console.log('Sent heartbeat ping to server');
           }
-        }, 25000); // Send ping every 25 seconds
+        }, 30000); // Send ping every 30 seconds (increased)
+      };
+      
+      // Track pong responses
+      wsRef.current.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'pong' || data.type === 'session_heartbeat') {
+          lastPongReceived = Date.now();
+        }
+        // Handle the main message processing in the main onmessage handler below
       };
 
+      // Enhanced connection handling with timeout protection
+      const openConnectionTimeout = setTimeout(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
+          console.error(`Connection timeout after ${connectionTimeout}ms`);
+          wsRef.current.close();
+          
+          toast({
+            title: "Timeout Conexiune",
+            description: "Conexiunea a expirat. Se reîncearcă...",
+            variant: "destructive",
+          });
+          
+          setTimeout(() => retryConnection(), 2000);
+        }
+      }, connectionTimeout);
+      
       wsRef.current.onopen = () => {
+        clearTimeout(openConnectionTimeout);
         console.log('Connected to realtime voice session');
         setIsConnected(true);
         setConnectionStatus('connected');
@@ -269,6 +313,11 @@ export default function VoiceTutorPanel({
         try {
           const data: RealtimeMessage = JSON.parse(event.data);
           console.log('Received message:', data.type, 'Session state:', data.sessionState || sessionState);
+
+          // Update pong tracking for heartbeat
+          if (data.type === 'pong' || data.type === 'session_heartbeat') {
+            lastPongReceived = Date.now();
+          }
 
           // Update session state and metrics from server
           if (data.sessionState) {
@@ -495,44 +544,100 @@ export default function VoiceTutorPanel({
       };
 
       wsRef.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        clearTimeout(openConnectionTimeout);
+        console.error('WebSocket error:', {
+          error: error,
+          readyState: wsRef.current?.readyState,
+          retryCount: retryCount,
+          timestamp: new Date().toISOString()
+        });
+        
         setConnectionStatus('error');
-        setSessionState('error');
         setLastError('Eroare de conexiune WebSocket');
         
-        toast({
-          title: "Eroare de Conexiune",
-          description: "Nu s-a putut conecta la serverul vocal",
-          variant: "destructive",
-        });
+        // Auto-retry on WebSocket errors (common cause of 1006)
+        if (retryCount < maxRetries) {
+          console.log(`Auto-retrying after WebSocket error... (attempt ${retryCount + 1}/${maxRetries})`);
+          setTimeout(() => {
+            retryConnection();
+          }, Math.min(2000 * Math.pow(1.5, retryCount), 10000)); // Progressive backoff
+        } else {
+          toast({
+            title: "Eroare Conexiune",
+            description: "Nu s-a putut stabili conexiunea după multiple încercări",
+            variant: "destructive",
+          });
+        }
       };
 
       wsRef.current.onclose = (event) => {
-        console.log('WebSocket connection closed', event.code, event.reason);
+        clearTimeout(openConnectionTimeout);
+        console.log('WebSocket connection closed:', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+          retryCount: retryCount,
+          sessionState: sessionState,
+          timestamp: new Date().toISOString()
+        });
+        
         setIsConnected(false);
         setConnectionStatus('disconnected');
-        setSessionState('disconnected');
-        setIsRecording(false);
-        setIsSpeaking(false);
-        setAutoRecordingEnabled(false);
-        setQueueLength(0);
         
         if (heartbeatRef.current) {
           clearInterval(heartbeatRef.current);
           heartbeatRef.current = null;
         }
         
-        // Stop audio recording
-        if (recorderRef.current) {
-          recorderRef.current.stop();
-          recorderRef.current = null;
-        }
-        
-        // Show appropriate message based on close reason
-        if (!event.wasClean && event.code !== 1000) {
+        // SPECIFIC HANDLING FOR 1006 ERROR (Abnormal Closure)
+        if (event.code === 1006) {
+          console.warn('Detected 1006 abnormal closure - implementing recovery strategy');
+          
+          if (retryCount < maxRetries) {
+            // Progressive delay with jitter to avoid thundering herd
+            const baseDelay = Math.min(2000 * Math.pow(1.5, retryCount), 15000);
+            const jitter = Math.random() * 1000; // Add up to 1 second of jitter
+            const delay = baseDelay + jitter;
+            
+            toast({
+              title: "Conexiune Întreruptă (1006)",
+              description: `Reconectare în ${Math.round(delay/1000)} secunde...`,
+            });
+            
+            setTimeout(() => {
+              console.log(`Retrying connection after 1006 error (attempt ${retryCount + 1}/${maxRetries})`);
+              retryConnection();
+            }, delay);
+          } else {
+            setCanRetry(false);
+            toast({
+              title: "Eroare de Conexiune Persistentă",
+              description: "Codul 1006 - vă rugăm să încercați din nou mai târziu",
+              variant: "destructive",
+            });
+          }
+        } else if (!event.wasClean && retryCount < maxRetries) {
+          // Handle other unexpected closures
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 8000);
+          
           toast({
             title: "Conexiune Întreruptă",
-            description: `Sesiunea s-a închis neașteptat (cod: ${event.code})`,
+            description: `Se reîncearcă în ${delay/1000} secunde...`,
+          });
+          
+          setTimeout(() => {
+            retryConnection();
+          }, delay);
+        } else if (event.wasClean) {
+          toast({
+            title: "Sesiune Închisă",
+            description: "Conexiunea s-a închis normal",
+          });
+        } else {
+          setCanRetry(false);
+          toast({
+            title: "Conexiune Eșuată",
+            description: `Nu s-a putut restabili conexiunea (cod: ${event.code})`,
             variant: "destructive",
           });
         }

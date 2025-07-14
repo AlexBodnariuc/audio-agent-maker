@@ -42,13 +42,16 @@ IMPORTANTE:
 
 Începe fiecare răspuns cu un salut prietenos și încurajează întrebări!`;
 
-// Enhanced configuration constants
+// Enhanced configuration constants - OPTIMIZED FOR 1006 ERROR FIX
 const RATE_LIMIT_MAX_SESSIONS = 10;
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const SESSION_TIMEOUT = 45000; // 45 seconds timeout
-const HEARTBEAT_INTERVAL = 15000; // 15 seconds between heartbeats
-const MAX_RECONNECT_ATTEMPTS = 3;
-const MESSAGE_QUEUE_MAX_SIZE = 50;
+const SESSION_TIMEOUT = 120000; // 2 minutes timeout (increased)
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds between heartbeats (increased)
+const CONNECTION_TIMEOUT = 20000; // 20 seconds for initial connection (increased)
+const MAX_RECONNECT_ATTEMPTS = 5; // Increased retry attempts
+const MESSAGE_QUEUE_MAX_SIZE = 30; // Reduced queue size to prevent overflow
+const HEARTBEAT_TIMEOUT = 45000; // 45 seconds heartbeat timeout
+const GRACEFUL_CLOSE_TIMEOUT = 5000; // 5 seconds for graceful close
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -402,29 +405,62 @@ serve(async (req) => {
           reason: event.reason,
           wasClean: event.wasClean,
           sessionState: sessionState,
+          connectionAttempts: connectionAttempts,
           timestamp: new Date().toISOString()
         });
         
         const wasReady = sessionState === 'ready';
         const wasConnecting = sessionState === 'connecting' || sessionState === 'configuring';
         const isUnexpectedClosure = !event.wasClean && (wasReady || wasConnecting);
+        const is1006Error = event.code === 1006; // Abnormal closure
         
-        socket.send(JSON.stringify({
-          type: 'session_ended',
-          message: wasReady ? 'Sesiunea s-a închis' : 'Conexiunea s-a întrerupt',
-          wasEstablished: wasReady,
-          wasUnexpected: isUnexpectedClosure,
-          closeCode: event.code,
-          closeReason: event.reason,
-          canRetry: isUnexpectedClosure && connectionAttempts < MAX_RECONNECT_ATTEMPTS,
-          timestamp: Date.now(),
-          sessionState: sessionState
-        }));
-
-        if (isUnexpectedClosure && sessionState !== 'error') {
-          attemptReconnection();
+        // Enhanced 1006 error handling
+        if (is1006Error) {
+          console.warn('Detected 1006 abnormal closure from OpenAI - implementing recovery');
+          sessionMetrics.errorsCount++;
+          
+          socket.send(JSON.stringify({
+            type: 'openai_1006_error',
+            message: 'Conexiune OpenAI întreruptă anormal (1006)',
+            wasEstablished: wasReady,
+            canRetry: connectionAttempts < MAX_RECONNECT_ATTEMPTS,
+            closeCode: event.code,
+            closeReason: event.reason || 'Abnormal closure',
+            timestamp: Date.now(),
+            sessionState: sessionState,
+            reconnectSuggested: true
+          }));
+          
+          if (connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
+            setTimeout(() => attemptReconnection(), 1000); // Quick retry for 1006
+          } else {
+            sessionState = 'error';
+            socket.send(JSON.stringify({
+              type: 'max_retries_exceeded',
+              message: 'Numărul maxim de reîncercări pentru eroarea 1006 a fost atins',
+              canRetry: false,
+              metrics: sessionMetrics
+            }));
+          }
         } else {
-          sessionState = 'disconnected';
+          // Handle other closure types
+          socket.send(JSON.stringify({
+            type: 'session_ended',
+            message: wasReady ? 'Sesiunea s-a închis' : 'Conexiunea s-a întrerupt',
+            wasEstablished: wasReady,
+            wasUnexpected: isUnexpectedClosure,
+            closeCode: event.code,
+            closeReason: event.reason,
+            canRetry: isUnexpectedClosure && connectionAttempts < MAX_RECONNECT_ATTEMPTS,
+            timestamp: Date.now(),
+            sessionState: sessionState
+          }));
+
+          if (isUnexpectedClosure && sessionState !== 'error') {
+            attemptReconnection();
+          } else {
+            sessionState = 'disconnected';
+          }
         }
       };
     };
@@ -441,17 +477,17 @@ serve(async (req) => {
           }
         });
         
-        // Connection timeout with cleanup
+        // Connection timeout with cleanup - OPTIMIZED FOR 1006 ERROR FIX
         const connectionTimeout = setTimeout(() => {
           if (sessionState === 'connecting' || sessionState === 'reconnecting') {
-            console.error('OpenAI connection timeout');
+            console.error(`OpenAI connection timeout after ${CONNECTION_TIMEOUT}ms`);
             if (openAISocket) {
-              openAISocket.close();
+              openAISocket.close(1000, 'Connection timeout'); // Graceful close
               openAISocket = null;
             }
             attemptReconnection();
           }
-        }, 15000);
+        }, CONNECTION_TIMEOUT);
 
         openAISocket.onopen = () => {
           clearTimeout(connectionTimeout);
