@@ -16,49 +16,45 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import EditAgentDialog from "./EditAgentDialog";
-
-interface VoicePersonality {
-  id: string;
-  name: string;
-  description: string;
-  medical_specialty: string;
-  agent_id: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+import type { VoiceAgent } from "@/lib/validation";
 
 interface VoiceAgentCardProps {
-  agent: VoicePersonality;
-  onSelect: (agent: VoicePersonality) => void;
-  onUpdate: (agentId: string, updates: Partial<VoicePersonality>) => void;
-  onDelete: (agentId: string) => void;
+  agent: VoiceAgent;
+  onSelect?: (agent: VoiceAgent) => void;
+  onUpdate?: (agentId: string, updates: Partial<VoiceAgent>) => void;
+  onDelete?: (agentId: string) => void;
+  onEdit?: (agent: VoiceAgent) => void;
   isSelected?: boolean;
+  disabled?: boolean;
 }
 
-const getSpecialtyIcon = (specialty: string) => {
+const getSpecialtyIcon = (specialty: string | null) => {
+  if (!specialty) return Stethoscope;
+  
   switch (specialty.toLowerCase()) {
-    case 'cardiology':
+    case 'cardiologie':
       return Heart;
-    case 'pediatrics':
+    case 'pediatrie':
       return Users;
-    case 'emergency medicine':
+    case 'medicina de urgenta':
       return Clock;
-    case 'general medicine':
+    case 'medicina generala':
     default:
       return Stethoscope;
   }
 };
 
-const getSpecialtyColor = (specialty: string) => {
+const getSpecialtyColor = (specialty: string | null) => {
+  if (!specialty) return 'medical-green';
+  
   switch (specialty.toLowerCase()) {
-    case 'cardiology':
+    case 'cardiologie':
       return 'medical-red';
-    case 'pediatrics':
+    case 'pediatrie':
       return 'medical-blue';
-    case 'emergency medicine':
+    case 'medicina de urgenta':
       return 'medical-yellow';
-    case 'general medicine':
+    case 'medicina generala':
     default:
       return 'medical-green';
   }
@@ -69,7 +65,9 @@ export default function VoiceAgentCard({
   onSelect, 
   onUpdate, 
   onDelete, 
-  isSelected = false 
+  onEdit,
+  isSelected = false,
+  disabled = false
 }: VoiceAgentCardProps) {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -78,6 +76,7 @@ export default function VoiceAgentCard({
   const specialtyColor = getSpecialtyColor(agent.medical_specialty);
 
   const handleSelect = () => {
+    if (disabled || !onSelect) return;
     setIsLoading(true);
     onSelect(agent);
     setTimeout(() => setIsLoading(false), 500);
@@ -85,11 +84,18 @@ export default function VoiceAgentCard({
 
   const handleEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setShowEditDialog(true);
+    if (disabled) return;
+    
+    if (onEdit) {
+      onEdit(agent);
+    } else {
+      setShowEditDialog(true);
+    }
   };
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (disabled || !onDelete) return;
     
     // Enhanced confirmation with Romanian text
     const confirmMessage = `Ești sigur că vrei să ștergi asistentul "${agent.name}"?\n\nAceastă acțiune nu poate fi anulată.`;
@@ -107,8 +113,10 @@ export default function VoiceAgentCard({
     }
   };
 
-  const handleUpdate = (updates: Partial<VoicePersonality>) => {
-    onUpdate(agent.id, updates);
+  const handleUpdate = (updates: Partial<VoiceAgent>) => {
+    if (onUpdate) {
+      onUpdate(agent.id, updates);
+    }
     setShowEditDialog(false);
   };
 
@@ -139,7 +147,7 @@ export default function VoiceAgentCard({
                   variant="secondary" 
                   className={`text-xs bg-${specialtyColor}/10 text-${specialtyColor} border-${specialtyColor}/20`}
                 >
-                  {agent.medical_specialty}
+                  {agent.medical_specialty || 'Medicina generală'}
                 </Badge>
               </div>
             </div>
@@ -149,24 +157,25 @@ export default function VoiceAgentCard({
                 size="sm"
                 variant="ghost"
                 onClick={handleEdit}
-                className="h-8 w-8 p-0"
+                disabled={disabled}
+                className="h-8 w-8 p-0 disabled:opacity-50"
               >
                 <Edit className="h-4 w-4" />
               </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={handleDelete}
-              disabled={isLoading}
-              className="h-8 w-8 p-0 hover:text-destructive disabled:opacity-50"
-              title="Șterge asistentul"
-            >
-              {isLoading ? (
-                <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              ) : (
-                <Trash2 className="h-4 w-4" />
-              )}
-            </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleDelete}
+                disabled={isLoading || disabled}
+                className="h-8 w-8 p-0 hover:text-destructive disabled:opacity-50"
+                title="Șterge asistentul"
+              >
+                {isLoading ? (
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -192,7 +201,7 @@ export default function VoiceAgentCard({
               className={`flex-1 ${isSelected ? 'bg-medical-blue hover:bg-medical-blue/90' : ''}`}
               variant={isSelected ? "default" : "outline"}
               onClick={handleSelect}
-              disabled={isLoading}
+              disabled={isLoading || disabled || !onSelect}
             >
               {isLoading ? (
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -207,12 +216,17 @@ export default function VoiceAgentCard({
         </CardContent>
       </Card>
 
-      <EditAgentDialog
-        open={showEditDialog}
-        onOpenChange={setShowEditDialog}
-        agent={agent}
-        onUpdate={handleUpdate}
-      />
+      {showEditDialog && (
+        <EditAgentDialog
+          open={showEditDialog}
+          onOpenChange={setShowEditDialog}
+          agent={agent}
+          onAgentUpdated={(updatedAgent) => {
+            handleUpdate(updatedAgent);
+            setShowEditDialog(false);
+          }}
+        />
+      )}
     </>
   );
 }

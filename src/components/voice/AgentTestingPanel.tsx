@@ -24,22 +24,12 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { SecurityValidator, SECURITY_MESSAGES } from "@/lib/security";
-
-interface VoicePersonality {
-  id: string;
-  name: string;
-  description: string;
-  medical_specialty: string;
-  agent_id: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+import type { VoiceAgent } from "@/lib/validation";
 
 interface AgentTestingPanelProps {
-  agent: VoicePersonality;
-  personalities: VoicePersonality[];
-  onAgentChange: (agent: VoicePersonality) => void;
+  agent: VoiceAgent;
+  personalities: VoiceAgent[];
+  onAgentChange: (agent: VoiceAgent) => void;
 }
 
 interface Message {

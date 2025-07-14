@@ -6,23 +6,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Edit, Save } from "lucide-react";
-
-interface VoicePersonality {
-  id: string;
-  name: string;
-  description: string;
-  medical_specialty: string;
-  agent_id: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+import { ROMANIAN_MEDICAL_SPECIALTIES } from "@/lib/validation";
+import type { VoiceAgent } from "@/lib/validation";
 
 interface EditAgentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  agent: VoicePersonality;
-  onUpdate: (updates: Partial<VoicePersonality>) => void;
+  agent: VoiceAgent;
+  onAgentUpdated: (updatedAgent: VoiceAgent) => void;
 }
 
 const medicalSpecialties = [
@@ -37,7 +28,7 @@ const medicalSpecialties = [
   "Pathology"
 ];
 
-export default function EditAgentDialog({ open, onOpenChange, agent, onUpdate }: EditAgentDialogProps) {
+export default function EditAgentDialog({ open, onOpenChange, agent, onAgentUpdated }: EditAgentDialogProps) {
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -49,8 +40,8 @@ export default function EditAgentDialog({ open, onOpenChange, agent, onUpdate }:
     if (agent) {
       setFormData({
         name: agent.name,
-        description: agent.description,
-        medical_specialty: agent.medical_specialty
+        description: agent.description || "",
+        medical_specialty: agent.medical_specialty || ""
       });
     }
   }, [agent]);
@@ -60,12 +51,15 @@ export default function EditAgentDialog({ open, onOpenChange, agent, onUpdate }:
     setIsSaving(true);
     
     try {
-      await onUpdate({
+      const updatedAgent: VoiceAgent = {
+        ...agent,
         name: formData.name,
-        description: formData.description,
-        medical_specialty: formData.medical_specialty,
+        description: formData.description || null,
+        medical_specialty: formData.medical_specialty || null,
         updated_at: new Date().toISOString()
-      });
+      };
+      
+      onAgentUpdated(updatedAgent);
     } finally {
       setIsSaving(false);
     }
@@ -103,9 +97,9 @@ export default function EditAgentDialog({ open, onOpenChange, agent, onUpdate }:
                   <SelectValue placeholder="Selectează specialitatea" />
                 </SelectTrigger>
                 <SelectContent>
-                  {medicalSpecialties.map((specialty) => (
+                  {ROMANIAN_MEDICAL_SPECIALTIES.map((specialty) => (
                     <SelectItem key={specialty} value={specialty}>
-                      {specialty}
+                      {specialty.charAt(0).toUpperCase() + specialty.slice(1)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -115,13 +109,13 @@ export default function EditAgentDialog({ open, onOpenChange, agent, onUpdate }:
 
           <div className="space-y-2">
             <Label htmlFor="edit-description">Descriere</Label>
-            <Textarea
-              id="edit-description"
-              value={formData.description}
-              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-              required
-              rows={4}
-            />
+              <Textarea
+                id="edit-description"
+                value={formData.description}
+                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                rows={4}
+                placeholder="Descriere opțională pentru asistent..."
+              />
           </div>
 
           <div className="flex gap-3 justify-end">

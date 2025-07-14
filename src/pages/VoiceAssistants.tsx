@@ -13,22 +13,11 @@ import AgentTestingPanel from "@/components/voice/AgentTestingPanel";
 import VoiceTutorPanel from "@/components/VoiceTutorPanel";
 import VoiceAgentManagement from "@/components/voice/VoiceAgentManagement";
 import { ROMANIAN_TRANSLATIONS } from "@/components/medmentor/RomanianUI";
-
-interface VoicePersonality {
-  id: string;
-  name: string;
-  description: string;
-  medical_specialty: string;
-  agent_id: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-  user_id?: string;
-}
+import type { VoiceAgent } from "@/lib/validation";
 
 export default function VoiceAssistants() {
-  const [personalities, setPersonalities] = useState<VoicePersonality[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<VoicePersonality | null>(null);
+  const [personalities, setPersonalities] = useState<VoiceAgent[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<VoiceAgent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -223,7 +212,7 @@ export default function VoiceAssistants() {
     }
   };
 
-  const handleAgentCreated = (newAgent: VoicePersonality) => {
+  const handleAgentCreated = (newAgent: VoiceAgent) => {
     setPersonalities(prev => [newAgent, ...prev]);
     setShowCreateDialog(false);
     toast({
@@ -232,11 +221,11 @@ export default function VoiceAssistants() {
     });
   };
 
-  const handleAgentSelect = (agent: VoicePersonality) => {
+  const handleAgentSelect = (agent: VoiceAgent) => {
     setSelectedAgent(agent);
   };
 
-  const handleAgentUpdate = async (agentId: string, updates: Partial<VoicePersonality>) => {
+  const handleAgentUpdate = async (agentId: string, updates: Partial<VoiceAgent>) => {
     try {
       setOperationInProgress(`update-${agentId}`);
       

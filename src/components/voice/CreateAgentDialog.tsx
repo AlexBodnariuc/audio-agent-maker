@@ -8,22 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Bot, Sparkles } from "lucide-react";
-
-interface VoicePersonality {
-  id: string;
-  name: string;
-  description: string;
-  medical_specialty: string;
-  agent_id: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+import { ROMANIAN_MEDICAL_SPECIALTIES } from "@/lib/validation";
+import type { VoiceAgent } from "@/lib/validation";
 
 interface CreateAgentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAgentCreated: (agent: VoicePersonality) => void;
+  onAgentCreated: (agent: VoiceAgent) => void;
 }
 
 const medicalSpecialties = [
@@ -243,9 +234,9 @@ export default function CreateAgentDialog({ open, onOpenChange, onAgentCreated }
                   <SelectValue placeholder="Selectează specialitatea" />
                 </SelectTrigger>
                 <SelectContent>
-                  {medicalSpecialties.map((specialty) => (
+                  {ROMANIAN_MEDICAL_SPECIALTIES.map((specialty) => (
                     <SelectItem key={specialty} value={specialty}>
-                      {specialty}
+                      {specialty.charAt(0).toUpperCase() + specialty.slice(1)}
                     </SelectItem>
                   ))}
                 </SelectContent>
