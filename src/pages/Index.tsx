@@ -375,6 +375,14 @@ export default function Index() {
                   <Bot className="h-4 w-4 mr-2" />
                   Asistenți Vocali
                 </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => navigate("/chat-demo")}
+                  className="border-medical-blue/30 text-medical-blue hover:bg-medical-blue/5"
+                >
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  Chat Demo
+                </Button>
               </CardContent>
             </Card>
           </div>
