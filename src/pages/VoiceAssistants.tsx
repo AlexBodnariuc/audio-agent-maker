@@ -15,6 +15,20 @@ import VoiceAgentManagement from "@/components/voice/VoiceAgentManagement";
 import { ROMANIAN_TRANSLATIONS } from "@/components/medmentor/RomanianUI";
 import type { VoiceAgent } from "@/lib/validation";
 
+// Helper function to convert database result to VoiceAgent type
+function transformToVoiceAgent(dbResult: any): VoiceAgent {
+  return {
+    ...dbResult,
+    persona_json: dbResult.persona_json as Record<string, any> | null,
+    limits_json: dbResult.limits_json as Record<string, any> | null,
+  };
+}
+
+// Helper function to transform array of database results
+function transformToVoiceAgents(dbResults: any[]): VoiceAgent[] {
+  return dbResults.map(transformToVoiceAgent);
+}
+
 export default function VoiceAssistants() {
   const [personalities, setPersonalities] = useState<VoiceAgent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<VoiceAgent | null>(null);
@@ -182,7 +196,9 @@ export default function VoiceAssistants() {
         throw new Error(`Eroare bază de date: ${error.message}`);
       }
       
-      setPersonalities(data || []);
+      // Transform the data to match VoiceAgent type
+      const transformedData = data ? transformToVoiceAgents(data) : [];
+      setPersonalities(transformedData);
       
       if (showRetryToast && data) {
         toast({

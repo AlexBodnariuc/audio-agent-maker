@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,15 @@ const agentTemplates = [
     instructions: "Ești un ghid comprehensive pentru admiterea la UMF în România. Ajuți elevii cu toate aspectele pregătirii: biologie, chimie, strategie de învățare și motivație. Ești empatic, încurajator și oferă sfaturi practice. Cunoști curriculum-ul român pentru clasele XI-XII și cerințele specifice ale UMF-urilor din România."
   }
 ];
+
+// Helper function to convert database result to VoiceAgent type
+function transformToVoiceAgent(dbResult: any): VoiceAgent {
+  return {
+    ...dbResult,
+    persona_json: dbResult.persona_json as Record<string, any> | null,
+    limits_json: dbResult.limits_json as Record<string, any> | null,
+  };
+}
 
 export default function CreateAgentDialog({ open, onOpenChange, onAgentCreated }: CreateAgentDialogProps) {
   const [formData, setFormData] = useState({
@@ -125,13 +135,16 @@ export default function CreateAgentDialog({ open, onOpenChange, onAgentCreated }
         throw new Error(`Eroare bază de date: ${error.message}`);
       }
 
+      // Transform the database result to VoiceAgent type
+      const transformedAgent = transformToVoiceAgent(data);
+
       toast({
         title: "Succes!",
-        description: `Asistentul "${data.name}" a fost creat cu succes`,
+        description: `Asistentul "${transformedAgent.name}" a fost creat cu succes`,
         variant: "default",
       });
 
-      onAgentCreated(data);
+      onAgentCreated(transformedAgent);
       
       // Reset form
       setFormData({
