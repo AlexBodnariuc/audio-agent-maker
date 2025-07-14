@@ -28,12 +28,21 @@ serve(async (req) => {
       throw new Error('Missing required environment variables');
     }
 
-    // Get user context from request headers
-    const authHeader = req.headers.get('authorization');
+    // Get authorization header and validate JWT
+    const authHeader = req.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Missing or invalid authorization header' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       auth: { persistSession: false },
       global: {
-        headers: authHeader ? { authorization: authHeader } : {}
+        headers: {
+          Authorization: authHeader
+        }
       }
     });
 

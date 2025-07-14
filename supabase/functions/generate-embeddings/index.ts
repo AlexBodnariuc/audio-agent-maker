@@ -21,14 +21,28 @@ serve(async (req) => {
   try {
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
 
-    if (!openaiApiKey || !supabaseUrl || !supabaseServiceRoleKey) {
+    if (!openaiApiKey || !supabaseUrl || !supabaseAnonKey) {
       throw new Error('Missing required environment variables');
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { persistSession: false }
+    // Get authorization header and validate JWT
+    const authHeader = req.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Missing or invalid authorization header' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false },
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
+      }
     });
 
     const { text, conversationId, specialtyContext }: EmbeddingRequest = await req.json();
